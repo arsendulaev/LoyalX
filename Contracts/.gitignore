@@ -1,0 +1,15 @@
+node_modules
+temp
+build
+dist
+.DS_Store
+package.ts
+.vscode/*
+.history/
+*.vsix
+.idea
+Session.vim
+.vim/
+.nvim/
+.emacs/
+.helix/
