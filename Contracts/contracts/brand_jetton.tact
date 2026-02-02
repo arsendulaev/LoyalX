@@ -41,21 +41,21 @@ contract BrandJetton with Deployable, Ownable {
     }
 
     // 2. ОБМЕН (SWAP)
-    // Когда сюда приходят чужие жетоны, срабатывает это уведомление
     receive(msg: TransferNotification) {
-        // msg.sender - это адрес кошелька, ОТ КОТОРОГО пришли деньги
-        // Проверяем, есть ли такой кошелек в нашем списке разрешенных для обмена
-        let rate: Int? = self.exchangeRates.get(msg.sender);
+        // ctx.sender - это адрес КОШЕЛЬКА, который прислал уведомление.
+        // В случае SWAP, это будет "Мой кошелек для Валюты А".
+        let ctx: Context = context(); 
+        
+        // Проверяем, разрешен ли обмен с ЭТОГО кошелька (адреса контракта)
+        let rate: Int? = self.exchangeRates.get(ctx.sender);
 
         if (rate != null) {
-            // Математика обмена
+            // msg.amount - сколько пришло чужих монет
+            // rate!! - курс (например, 2)
             let amountToMint: Int = msg.amount * rate!!;
-            
-            // msg.sender в уведомлении (в поле sender) - это Изначальный Владелец (User)
-            // msg.sender (контекст) - это контракт кошелька
-            
-            // ВНИМАНИЕ: В TransferNotification поле `sender` - это тот, кто инициировал перевод (User).
-            // Мы начисляем наши новые баллы именно ему.
+
+            // msg.sender - это Юзер (кто инициировал перевод).
+            // Начисляем новые токены ему.
             self.mint(msg.sender, amountToMint, msg.sender);
         }
     }
@@ -68,7 +68,7 @@ contract BrandJetton with Deployable, Ownable {
 
     // --- ПРИВАТНАЯ ФУНКЦИЯ (СЕРДЦЕ СИСТЕМЫ) ---
     // Она вычисляет адрес кошелька и отправляет туда команду "Зачислить" + Код контракта
-    fun mint(to: Address, amount: Int, response_destination: Address) {
+    fun mint(to: Address, amount: Int, response_destination: Address?) {
         self.totalSupply += amount;
         
         // Магия Blueprint: вычисляем StateInit (Код + Данные) будущего кошелька

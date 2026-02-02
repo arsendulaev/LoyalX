@@ -16,7 +16,7 @@ message(0x178d4519) InternalTransfer {
     queryId: Int as uint64;
     amount: Int as coins;
     from: Address;
-    responseDestination: Address;
+    responseDestination: Address?;
     forwardTonAmount: Int as coins;
     forwardPayload: Slice as remaining;
 }
@@ -52,9 +52,9 @@ contract JettonWallet {
         self.balance += msg.amount;
 
         // Если отправитель просил уведомить владельца (например, для фронтенда)
-        if (msg.forwardTonAmount > 0) {
+        if (msg.responseDestination != null) {
             send(SendParameters {
-                to: self.owner,
+                to: msg.responseDestination!!,
                 value: msg.forwardTonAmount,
                 bounce: false,
                 body: TransferNotification {
@@ -82,35 +82,45 @@ contract JettonWallet {
     // Это вызывает сам пользователь из приложения LoyalX
     receive(msg: Transfer) {
         let ctx: Context = context();
-
-        // Только владелец кошелька может тратить деньги
         require(ctx.sender == self.owner, "Access denied");
         require(self.balance >= msg.amount, "Insufficient balance");
 
-        // Списываем средства
         self.balance -= msg.amount;
 
-        // ВНИМАНИЕ: Здесь в полноценном стандарте мы должны ВЫЧИСЛИТЬ адрес
-        // кошелька получателя (RecipientWallet).
-        // Но так как `init` код кошелька хранится в Мастере,
-        // то часто в упрощенных версиях мы шлем через Мастер или
-        // требуем, чтобы фронтенд прислал адрес кошелька получателя.
+        // --- ИСПРАВЛЕНИЕ НАЧАЛО ---
+        
+        // 1. Вычисляем StateInit кошелька получателя
+        // (Мы предполагаем, что у получателя такой же мастер, как у нас)
+        let targetStateInit: StateInit = initOf JettonWallet(msg.destination, self.master);
+        let targetWalletAddress: Address = contractAddress(targetStateInit);
 
-        // Для MVP и корректной архитектуры TEP-74, правильный путь:
-        // Кошелек должен уметь вычислять адрес другого кошелька.
-        // Для этого нам нужно обновить `BrandJetton`, чтобы он передал нам код кошелька.
-
-        // ПОКА (Заглушка для компиляции): Мы предполагаем, что сообщение уйдет
-        // на `destination` (но в реальности оно должно идти на JettonWallet получателя).
-        // Мы это поправим на следующем шаге "Связывания".
+        // 2. Отправляем InternalTransfer на АДРЕС КОШЕЛЬКА ПОЛУЧАТЕЛЯ
+        send(SendParameters{
+            to: targetWalletAddress,
+            value: 0,
+            bounce: true,
+            mode: SendRemainingValue, // Пересылаем весь газ дальше
+            body: InternalTransfer{
+                queryId: msg.queryId,
+                amount: msg.amount,
+                from: self.owner, // Указываем, от кого реально пришли деньги
+                responseDestination: msg.responseDestination,
+                forwardTonAmount: msg.forwardTonAmount,
+                forwardPayload: msg.forwardPayload
+            }.toCell(),
+            code: targetStateInit.code, // Приложить код, если кошелек еще не создан
+            data: targetStateInit.data
+        });
+        // --- ИСПРАВЛЕНИЕ КОНЕЦ ---
     }
 
     // 3. ОБРАБОТКА ОШИБОК (Bounced)
     // Если мы отправили деньги, а там ошибка - возвращаем на баланс
-    bounced(msg: InternalTransfer) {
+    bounced(msg: bounced<InternalTransfer>) {
+        // При баунсе нам доступны только первые поля, которые влезли в лимит.
+        // amount находится в начале InternalTransfer, поэтому он доступен.
         self.balance += msg.amount;
     }
-
     // Геттер для отображения баланса во фронтенде
     get fun get_wallet_data(): JettonWalletData {
         return JettonWalletData {
