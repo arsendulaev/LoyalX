@@ -31,7 +31,7 @@ message(0xd53276db) Excesses {
 }
 
 contract JettonWallet {
-    balance: Int as coins = 0;
+    balance: Int as coins;
     owner: Address;
     master: Address;
 
@@ -59,7 +59,7 @@ contract JettonWallet {
 
         if (msg.responseDestination != null) {
             send(SendParameters {
-                to: msg.responseDestination,
+                to: msg.responseDestination!!,
                 value: 0,
                 bounce: false,
                 mode: SendRemainingValue + SendIgnoreErrors,

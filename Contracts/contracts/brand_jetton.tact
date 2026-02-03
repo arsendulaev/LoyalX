@@ -7,6 +7,11 @@ message SetExchangeRate {
     rate: Int as uint32;
 }
 
+message MintTo {
+    to: Address;
+    amount: Int as coins;
+}
+
 contract BrandJetton with Deployable, Ownable {
     owner: Address;
     symbol: String;
@@ -31,6 +36,11 @@ contract BrandJetton with Deployable, Ownable {
         self.mint(ctx.sender, ton("100"), ctx.sender);
     }
 
+    receive(msg: MintTo) {
+        self.requireOwner();
+        self.mint(msg.to, msg.amount, msg.to);
+    }
+
     receive(msg: TransferNotification) {
         let ctx: Context = context(); 
         let rate: Int? = self.exchangeRates.get(ctx.sender);
@@ -48,20 +58,23 @@ contract BrandJetton with Deployable, Ownable {
 
     fun mint(to: Address, amount: Int, response_destination: Address?) {
         self.totalSupply += amount;
+        
         let winit: StateInit = initOf JettonWallet(to, myAddress());
+        let walletAddress: Address = contractAddress(winit);
         send(SendParameters{
-            to: contractAddress(winit),
-            value: 0, 
-            bounce: true,
-            mode: SendRemainingValue,
+            to: walletAddress,
+            value: ton("1"),
+            bounce: false,
             body: InternalTransfer{ 
                 queryId: 0,
                 amount: amount,
                 from: myAddress(),
-                responseDestination: responseDestination,
+                responseDestination: response_destination,
                 forwardTonAmount: 0,
                 forwardPayload: emptySlice()
             }.toCell(),
+            code: winit.code,
+            data: winit.data
             code: winit.code,
             data: winit.data
         });

@@ -27,8 +27,15 @@ contract Factory with Deployable {
         self.nextBrandId += 1;
         let brandInit: StateInit = initOf BrandJetton(sender(), msg.ticker, msg.brandName, msg.content);
         let brandAddress: Address = contractAddress(brandInit);
-        deploy(brandInit, null);
-        self.reply(BrandCreated{
+        send(SendParameters{
+            to: brandAddress,
+            value: ton("0.15"),
+            bounce: false,
+            body: Deploy{ queryId: 0 }.toCell(),
+            code: brandInit.code,
+            data: brandInit.data
+        });
+        emit(BrandCreated{
             brandId: currentId,
             brandAddress: brandAddress,
             owner: sender()

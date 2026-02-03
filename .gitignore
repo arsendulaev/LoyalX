@@ -1,8 +1,23 @@
-node_modules/
-dist/
-build/
-.env
+build/                 # Результаты компиляции контрактов
+temp/                  # Временные файлы Blueprint
+.env                   # Приватные ключи и API-URL (обязательно!)
+.env.local
+node_modules/          # Стандартно, но проверь, что есть
+Documentation/         # Документация
+
+# Contract build artifacts
+Contracts/build/
+Contracts/wrappers/
+
+# Frontend build
+tgapp/dist/
+tgapp/node_modules/
+
+# IDE
+.vscode/
+.idea/
 .DS_Store
-*.key
-wallet.json
-Documentation/
+
+# Logs
+*.log
+npm-debug.log*
