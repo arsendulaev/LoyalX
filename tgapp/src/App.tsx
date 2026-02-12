@@ -5,8 +5,8 @@ import { CreateBrandScreen } from './screens/CreateBrandScreen';
 import { SwapScreen } from './screens/SwapScreen';
 import { Navigation } from './components/Navigation';
 
-// Используем полный абсолютный URL для GitHub Pages
-const manifestUrl = 'https://raijin57.github.io/LoyalX/tonconnect-manifest.json';
+// Для GitHub Pages с base path используем относительный путь
+const manifestUrl = new URL('/LoyalX/tonconnect-manifest.json', window.location.origin).toString();
 
 function App() {
   return (
