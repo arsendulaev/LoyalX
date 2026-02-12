@@ -5,13 +5,18 @@ import { CreateBrandScreen } from './screens/CreateBrandScreen';
 import { SwapScreen } from './screens/SwapScreen';
 import { Navigation } from './components/Navigation';
 
-// Используем относительный путь - работает и локально и в production
-const manifestUrl = window.location.origin + '/tonconnect-manifest.json';
+// Используем полный абсолютный URL для GitHub Pages
+const manifestUrl = 'https://raijin57.github.io/LoyalX/tonconnect-manifest.json';
 
 function App() {
   return (
-    <TonConnectUIProvider manifestUrl={manifestUrl}>
-      <BrowserRouter>
+    <TonConnectUIProvider 
+      manifestUrl={manifestUrl}
+      actionsConfiguration={{
+        twaReturnUrl: 'https://t.me/LoyalXBot'
+      }}
+    >
+      <BrowserRouter basename="/LoyalX">
         <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
           <Navigation />
           <main className="container mx-auto px-4 py-8">
