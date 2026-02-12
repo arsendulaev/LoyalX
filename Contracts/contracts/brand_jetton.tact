@@ -10,6 +10,12 @@ message SetExchangeRate {
     rate: Int as uint32;
 }
 
+// Минтинг токенов для конкретного адреса
+message MintTo {
+    to: Address;
+    amount: Int as coins;
+}
+
 // --- Контракт ---
 
 contract BrandJetton with Deployable, Ownable {
@@ -33,11 +39,17 @@ contract BrandJetton with Deployable, Ownable {
     }
 
     // 1. МИНТИНГ (Эмиссия баллов)
-    // Владелец может просто начислить баллы себе или клиенту
+    // Владелец может просто начислить баллы себе
     receive("Mint") {
         let ctx: Context = context();
         self.requireOwner();
         self.mint(ctx.sender, ton("100"), ctx.sender); // Начисляем 100 баллов владельцу
+    }
+
+    // Минтинг для конкретного адреса
+    receive(msg: MintTo) {
+        self.requireOwner();
+        self.mint(msg.to, msg.amount, msg.to);
     }
 
     // 2. ОБМЕН (SWAP)
@@ -71,24 +83,26 @@ contract BrandJetton with Deployable, Ownable {
     fun mint(to: Address, amount: Int, response_destination: Address?) {
         self.totalSupply += amount;
         
-        // Магия Blueprint: вычисляем StateInit (Код + Данные) будущего кошелька
+        // Вычисляем адрес кошелька
         let winit: StateInit = initOf JettonWallet(to, myAddress());
+        let walletAddress: Address = contractAddress(winit);
         
+        // Отправляем InternalTransfer с code и data
+        // Контракт создастся и обработает сообщение
         send(SendParameters{
-            to: contractAddress(winit), // Вычисляем адрес, где должен жить кошелек
-            value: 0, 
-            bounce: true,
-            mode: SendRemainingValue, // Отправляем весь оставшийся газ
+            to: walletAddress,
+            value: ton("1"), // МАКСИМУМ газа
+            bounce: false,
             body: InternalTransfer{ 
                 queryId: 0,
                 amount: amount,
                 from: myAddress(),
-                responseDestination: responseDestination,
+                responseDestination: response_destination,
                 forwardTonAmount: 0,
                 forwardPayload: emptySlice()
             }.toCell(),
-            code: winit.code, // <-- ВАЖНО: Прикладываем код кошелька
-            data: winit.data  // <-- ВАЖНО: Прикладываем данные инициализации
+            code: winit.code,
+            data: winit.data
         });
     }
 

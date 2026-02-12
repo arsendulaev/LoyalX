@@ -35,7 +35,7 @@ message(0xd53276db) Excesses {
 // --- Сам контракт Кошелька ---
 
 contract JettonWallet {
-    balance: Int as coins = 0;
+    balance: Int as coins;
     owner: Address; // Владелец этого кошелька (User)
     master: Address; // Адрес Мастер-контракта (BrandJetton)
 
@@ -69,7 +69,7 @@ contract JettonWallet {
         // Возвращаем сдачу (Gas) тому, кто указан в response_destination
         if (msg.responseDestination != null) {
             send(SendParameters {
-                to: msg.responseDestination,
+                to: msg.responseDestination!!, // Разворачиваем Optional тип
                 value: 0,
                 bounce: false,
                 mode: SendRemainingValue + SendIgnoreErrors, // Весь остаток газа

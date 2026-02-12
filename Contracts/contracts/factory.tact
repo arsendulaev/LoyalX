@@ -36,12 +36,18 @@ contract Factory with Deployable {
         let brandAddress: Address = contractAddress(brandInit);
 
         // 3. Отправляем сообщение на деплой
-        // Передаем 0.05 TON на "жизнь" новому контракту
-        deploy(brandInit, null);
-
-        // 4. Твой механизм ответа (reply) + событие (emit)
-        // reply отправит сообщение обратно кошельку, а emit запишет это в историю логов
-        self.reply(BrandCreated{
+        // Оставляем немного газа для операций Factory
+        send(SendParameters{
+            to: brandAddress,
+            value: ton("0.15"), // Фиксированная сумма для деплоя
+            bounce: false,
+            body: Deploy{ queryId: 0 }.toCell(),
+            code: brandInit.code,
+            data: brandInit.data
+        });
+        
+        // 4. Emit события создания бренда
+        emit(BrandCreated{
             brandId: currentId,
             brandAddress: brandAddress,
             owner: sender()
