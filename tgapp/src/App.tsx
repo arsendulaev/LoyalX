@@ -15,6 +15,10 @@ function App() {
       actionsConfiguration={{
         twaReturnUrl: 'https://t.me/LoyalXBot'
       }}
+      enableAndroidBackHandler={false}
+      walletsListConfiguration={{
+        includeWallets: []
+      }}
     >
       <BrowserRouter basename="/LoyalX">
         <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
