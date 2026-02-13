@@ -1,24 +1,24 @@
-# LoyalX - Децентрализованная система лояльности на TON
+# LoyalX
 
-LoyalX - это кросс-продуктовая on-chain система лояльности, построенная на блокчейне TON. Позволяет брендам создавать свои токены лояльности (Jettons TEP-74) и пользователям обменивать их между собой.
+Децентрализованная кросс-продуктовая система лояльности на блокчейне TON. Позволяет брендам создавать свои токены лояльности (Jettons TEP-74) и пользователям обменивать их между собой.
 
-## 🏗️ Архитектура проекта
+## Архитектура
 
 ```
 LoyalX/
 ├── Contracts/          # Смарт-контракты на Tact
 │   ├── contracts/      # Исходники контрактов
-│   ├── tests/          # Тесты на TypeScript + Sandbox
+│   ├── tests/          # Тесты (TypeScript + Sandbox)
 │   └── wrappers/       # TypeScript обёртки (генерируются)
-├── tgapp/             # Frontend на React + Vite
+├── tgapp/              # Frontend (React + Vite)
 │   └── src/
-│       ├── screens/   # Экраны приложения
-│       ├── components/# React компоненты
-│       └── hooks/     # Custom hooks
-└── Documentation/     # Техническое задание
+│       ├── screens/    # Экраны приложения
+│       ├── components/ # React компоненты
+│       └── hooks/      # Custom hooks
+└── Documentation/      # Техническое задание
 ```
 
-## 🚀 Быстрый старт
+## Быстрый старт
 
 ### Предварительные требования
 
@@ -46,7 +46,7 @@ cd ../tgapp
 npm install
 ```
 
-## 📦 Смарт-контракты
+## Смарт-контракты
 
 ### Компиляция
 
@@ -77,9 +77,9 @@ npm test
 npx blueprint run deployFactory
 ```
 
-⚠️ **Важно:** Для деплоя нужны testnet TON. Получите их в [TON Testnet Faucet](https://testnet.tonscan.org/faucet).
+Для деплоя нужны testnet TON. 
 
-## 🎨 Frontend
+## Frontend
 
 ### Разработка
 
@@ -105,7 +105,7 @@ npm run build
 3. Push код в main ветку
 4. GitHub Actions автоматически задеплоит приложение
 
-## 🔧 Конфигурация
+## Конфигурация
 
 ### TON Connect
 
@@ -127,22 +127,7 @@ npm run build
 VITE_TON_API_KEY=your_toncenter_api_key
 ```
 
-## 📱 Telegram Mini App
-
-### Создание бота
-
-1. Откройте [@BotFather](https://t.me/BotFather) в Telegram
-2. Создайте нового бота: `/newbot`
-3. Настройте Mini App: `/newapp`
-4. Укажите URL вашего деплоя
-
-### Настройка
-
-В настройках бота укажите:
-- **Web App URL:** `https://your-github-pages-url.github.io/LoyalX`
-- **Short name:** `loyalx`
-
-## 🧪 Тестирование
+## Тестирование
 
 ### Контракты
 
@@ -151,14 +136,7 @@ cd Contracts
 npm test
 ```
 
-### Frontend (TODO)
-
-```bash
-cd tgapp
-npm test
-```
-
-## 📚 Документация
+## Документация
 
 Подробное техническое задание находится в `Documentation/TechnicalTask.pdf`
 
@@ -169,34 +147,14 @@ npm test
 3. **Обмен токенов** - пользователи могут обменивать токены между брендами
 4. **Просмотр балансов** - отображение всех токенов пользователя
 
-## 🔐 Безопасность
+## Безопасность
 
 - Контракты следуют стандарту TEP-74
 - Все операции требуют подписи кошелька
 - Только владелец бренда может минтить токены
 - Курсы обмена устанавливаются владельцами брендов
 
-## 🐛 Известные проблемы
-
-- ⚠️ В Blueprint Sandbox есть проблема с чтением балансов jetton (init flag). В реальном testnet/mainnet всё работает корректно.
-
-## 🤝 Вклад в проект
-
-1. Fork репозитория
-2. Создайте feature branch
-3. Commit изменения
-4. Push в branch
-5. Создайте Pull Request
-
-## 📄 Лицензия
-
-MIT
-
-## 👥 Авторы
-
-LoyalX Team
-
-## 🔗 Полезные ссылки
+## Полезные ссылки
 
 - [TON Documentation](https://docs.ton.org/)
 - [Tact Language](https://tact-lang.org/)
