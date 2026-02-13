@@ -12,7 +12,13 @@ export class ContractService {
   private factoryAddress: Address;
   private brandsCache: { brands: Address[]; timestamp: number } | null = null;
   private brandInfoCache: Map<string, { info: any; timestamp: number }> = new Map();
-  private readonly CACHE_TTL = 30000; // 30 секунд
+  private readonly CACHE_TTL = 120000; // 2 минуты
+
+  // сброс кеша (для ручного обновления)
+  clearCache() {
+    this.brandsCache = null;
+    this.brandInfoCache.clear();
+  }
 
   constructor(client: TonClient, factoryAddress: string) {
     this.client = client;
@@ -123,7 +129,7 @@ export class ContractService {
     }
   }
 
-  async getUserBalances(userAddress: Address) {
+  async getUserBalances(userAddress: Address, includeZero = true) {
     const brands = await this.getAllBrands();
     const results: { brand: Address; balance: bigint; meta: { name: string; symbol: string; description: string; image: string } }[] = [];
 
@@ -133,9 +139,15 @@ export class ContractService {
           this.getUserBalance(brandAddr, userAddress),
           this.getBrandInfo(brandAddr),
         ]);
+        
+        // пропускаем нулевые балансы если не нужны
+        if (!includeZero && balance === 0n) continue;
+        
         const meta = info?.content ? this.parseBrandMetadata(info.content) : { name: 'Unknown', symbol: '???', description: '', image: '' };
         results.push({ brand: brandAddr, balance, meta });
-      } catch {}
+      } catch (err) {
+        console.error('getUserBalances error for brand', brandAddr.toString(), err);
+      }
     }
 
     return results;
@@ -251,6 +263,15 @@ export class ContractService {
       return true;
     } catch {
       return false;
+    }
+  }
+
+  // конвертация в bounceable формат (EQ...)
+  static toBounceable(addr: string): string {
+    try {
+      return Address.parse(addr).toString();
+    } catch {
+      return addr;
     }
   }
 }

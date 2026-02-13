@@ -1,17 +1,17 @@
-import { useMemo } from 'react';
 import { useTonClient } from './useTonClient';
 import { ContractService } from '../services/contractService';
+
+const factoryAddress = import.meta.env.VITE_FACTORY_ADDRESS || 'EQBJOqlUdtZYjNMTaRFWQoxDRZELF6IYj5jT1U0M40TT7Kua';
+
+// создаём сервис один раз
+let contractServiceInstance: ContractService | null = null;
 
 export function useContract() {
   const client = useTonClient();
 
-  const contractService = useMemo(() => {
-    if (!client) return null;
-    
-    const factoryAddress = import.meta.env.VITE_FACTORY_ADDRESS || 'EQBJOqlUdtZYjNMTaRFWQoxDRZELF6IYj5jT1U0M40TT7Kua';
-    
-    return new ContractService(client, factoryAddress);
-  }, [client]);
+  if (!contractServiceInstance) {
+    contractServiceInstance = new ContractService(client, factoryAddress);
+  }
 
-  return contractService;
+  return contractServiceInstance;
 }

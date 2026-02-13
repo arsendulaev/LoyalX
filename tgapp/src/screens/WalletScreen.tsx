@@ -16,28 +16,38 @@ export function WalletScreen() {
   const [balances, setBalances] = useState<TokenBalance[]>([]);
   const [loading, setLoading] = useState(false);
 
+  const loadBalances = async (forceRefresh = false) => {
+    if (!connected || !address || !contractService) return;
+    
+    if (forceRefresh) {
+      contractService.clearCache();
+    }
+    
+    setLoading(true);
+    try {
+      const data = await contractService.getUserBalances(address, false); // только ненулевые
+      setBalances(data.map(d => ({
+        brand: d.brand,
+        balance: d.balance,
+        name: d.meta.name,
+        symbol: d.meta.symbol,
+      })));
+    } catch (error) {
+      console.error('WalletScreen load error:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (!connected || !address || !contractService) return;
-
-    const load = async () => {
-      setLoading(true);
-      try {
-        const data = await contractService.getUserBalances(address);
-        setBalances(data.map(d => ({
-          brand: d.brand,
-          balance: d.balance,
-          name: d.meta.name,
-          symbol: d.meta.symbol,
-        })));
-      } catch (error) {
-        console.error('WalletScreen load error:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    load();
-  }, [connected, address, contractService]);
+    
+    loadBalances();
+    
+    // автообновление каждые 10 секунд
+    const interval = setInterval(loadBalances, 10000);
+    return () => clearInterval(interval);
+  }, [connected, address]);
 
   if (!connected) {
     return (
@@ -61,7 +71,19 @@ export function WalletScreen() {
     <div className="space-y-4">
       {/* адрес кошелька */}
       <div className="bg-white/80 backdrop-blur-sm rounded-2xl p-4 shadow-sm border border-gray-100">
-        <p className="text-xs text-gray-400 mb-1">Мой кошелёк</p>
+        <div className="flex items-start justify-between mb-1">
+          <p className="text-xs text-gray-400">Мой кошелёк</p>
+          <button
+            onClick={() => loadBalances(true)}
+            disabled={loading}
+            className="text-indigo-600 hover:text-indigo-700 disabled:opacity-50"
+            title="Обновить балансы"
+          >
+            <svg className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+          </button>
+        </div>
         <p className="font-mono text-xs text-gray-700 break-all leading-relaxed">
           {address?.toString()}
         </p>
