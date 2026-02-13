@@ -25,7 +25,13 @@ export function WalletScreen() {
     
     setLoading(true);
     try {
-      const data = await contractService.getUserBalances(address, false); // только ненулевые
+      console.log('Loading balances for:', address.toString());
+      const data = await contractService.getUserBalances(address, true); // показываем ВСЕ бренды (включая нулевые)
+      console.log('Loaded balances:', data.length, 'brands');
+      data.forEach(d => {
+        console.log(`Brand ${d.meta.name} (${d.meta.symbol}):`, Number(d.balance) / 1e9, 'tokens');
+      });
+      
       setBalances(data.map(d => ({
         brand: d.brand,
         balance: d.balance,
@@ -100,30 +106,37 @@ export function WalletScreen() {
           </div>
         ) : balances.length === 0 ? (
           <div className="text-center py-8">
-            <p className="text-gray-400 text-sm">Нет токенов</p>
-            <p className="text-gray-300 text-xs mt-1">Получите от брендов или обменяйте</p>
+            <p className="text-gray-400 text-sm">Нет брендов</p>
+            <p className="text-gray-300 text-xs mt-1">Создайте бренд и начислите токены</p>
           </div>
         ) : (
           <div className="space-y-2">
-            {balances.map(({ brand, balance, name, symbol }) => (
-              <div
-                key={brand.toString()}
-                className="flex items-center justify-between p-3 bg-gray-50/80 rounded-xl"
-              >
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium text-gray-800 truncate">{name}</p>
-                  <p className="text-xs text-gray-400 font-mono">
-                    {brand.toString().slice(0, 6)}...{brand.toString().slice(-4)}
-                  </p>
+            {balances.map(({ brand, balance, name, symbol }) => {
+              const isZero = balance === 0n;
+              return (
+                <div
+                  key={brand.toString()}
+                  className={`flex items-center justify-between p-3 rounded-xl ${
+                    isZero ? 'bg-gray-100/50 opacity-60' : 'bg-gray-50/80'
+                  }`}
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className={`text-sm font-medium truncate ${isZero ? 'text-gray-500' : 'text-gray-800'}`}>
+                      {name} {isZero && <span className="text-xs text-gray-400">(нет токенов)</span>}
+                    </p>
+                    <p className="text-xs text-gray-400 font-mono">
+                      {brand.toString().slice(0, 6)}...{brand.toString().slice(-4)}
+                    </p>
+                  </div>
+                  <div className="text-right ml-3">
+                    <p className={`text-base font-bold ${isZero ? 'text-gray-400' : 'text-indigo-600'}`}>
+                      {(Number(balance) / 1e9).toFixed(2)}
+                    </p>
+                    <p className="text-xs text-gray-400">{symbol}</p>
+                  </div>
                 </div>
-                <div className="text-right ml-3">
-                  <p className="text-base font-bold text-indigo-600">
-                    {(Number(balance) / 1e9).toFixed(2)}
-                  </p>
-                  <p className="text-xs text-gray-400">{symbol}</p>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

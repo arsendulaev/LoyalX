@@ -59,7 +59,7 @@ export function ExchangeRatesScreen() {
     };
 
     load();
-  }, [connected, address, contractService]);
+  }, [connected, address]); // убрал contractService из dependencies
 
   const myBrands = brands.filter(b => b.isOwner);
   const otherBrands = brands.filter(b => b.address.toString() !== myBrand);

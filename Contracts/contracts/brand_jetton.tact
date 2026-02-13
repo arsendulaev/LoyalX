@@ -91,7 +91,7 @@ contract BrandJetton with Deployable, Ownable {
         // Контракт создастся и обработает сообщение
         send(SendParameters{
             to: walletAddress,
-            value: ton("1"), // МАКСИМУМ газа
+            value: ton("0.1"), // достаточно для деплоя и обработки
             bounce: false,
             body: InternalTransfer{ 
                 queryId: 0,

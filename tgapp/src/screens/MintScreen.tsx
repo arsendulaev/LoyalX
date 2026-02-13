@@ -30,6 +30,9 @@ export function MintScreen() {
       setLoadingBrands(true);
       try {
         const brandAddresses = await contractService.getAllBrands();
+        console.log('MintScreen: Total brands found:', brandAddresses.length);
+        console.log('MintScreen: User address:', address.toString({ bounceable: true }));
+        
         const results: Brand[] = [];
 
         for (const brandAddr of brandAddresses) {
@@ -38,13 +41,14 @@ export function MintScreen() {
             if (!info) continue;
             
             // показываем только бренды этого пользователя
-            const adminAddress = info.admin.toString();
-            const userAddress = address.toString();
+            // нормализуем адреса к одному формату (bounceable)
+            const adminAddress = info.admin.toString({ bounceable: true });
+            const userAddress = address.toString({ bounceable: true });
             
             console.log('Brand check:', {
               brand: brandAddr.toString().slice(0, 10) + '...',
-              admin: adminAddress.slice(0, 10) + '...',
-              user: userAddress.slice(0, 10) + '...',
+              admin: adminAddress,
+              user: userAddress,
               match: adminAddress === userAddress,
             });
             
@@ -60,6 +64,7 @@ export function MintScreen() {
           }
         }
 
+        console.log('MintScreen: User owns', results.length, 'brands');
         setBrands(results);
       } catch (error) {
         console.error('MintScreen load error:', error);
@@ -69,7 +74,7 @@ export function MintScreen() {
     };
 
     load();
-  }, [connected, address, contractService]);
+  }, [connected, address]); // убрал contractService из dependencies
 
   const handleMint = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -106,7 +111,7 @@ export function MintScreen() {
       console.log('Sending mint transaction:', msg);
 
       const result = await tonConnectUI.sendTransaction({
-        validUntil: Math.floor(Date.now() / 1000) + 600,
+        validUntil: Math.floor(Date.now() / 1000) + 300, // 5 минут
         messages: [msg],
       });
 

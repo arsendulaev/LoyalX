@@ -1,35 +1,42 @@
 import { Address, toNano, beginCell, Cell } from '@ton/core';
 import { TonClient } from '@ton/ton';
-import { Factory, storeCreateBrand } from '../contracts/Factory';
-import { BrandJetton, storeMintTo, storeSetExchangeRate } from '../contracts/BrandJetton';
-import { JettonWallet, storeTransfer } from '../contracts/JettonWallet';
-import type { CreateBrand } from '../contracts/Factory';
-import type { MintTo, SetExchangeRate } from '../contracts/BrandJetton';
-import type { Transfer } from '../contracts/JettonWallet';
+import { Factory, storeCreateBrand, CreateBrand } from '../contracts/Factory';
+import { BrandJetton, storeMintTo, storeSetExchangeRate, MintTo, SetExchangeRate } from '../contracts/BrandJetton';
+import { JettonWallet, storeTransfer, Transfer } from '../contracts/JettonWallet';
 
 export class ContractService {
   private client: TonClient;
   private factoryAddress: Address;
+
   private brandsCache: { brands: Address[]; timestamp: number } | null = null;
   private brandInfoCache: Map<string, { info: any; timestamp: number }> = new Map();
   private readonly CACHE_TTL = 120000; // 2 минуты
-
-  // сброс кеша (для ручного обновления)
-  clearCache() {
-    this.brandsCache = null;
-    this.brandInfoCache.clear();
-  }
+  
+  // для объединения запросов (Promise deduplication)
+  private getAllBrandsPromise: Promise<Address[]> | null = null;
 
   constructor(client: TonClient, factoryAddress: string) {
     this.client = client;
     this.factoryAddress = Address.parse(factoryAddress);
   }
 
+  // утилита для задержки
+  private async delay(ms: number) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  // сброс кеша (для ручного обновления)
+  clearCache() {
+    this.brandsCache = null;
+    this.brandInfoCache.clear();
+    this.getAllBrandsPromise = null;
+  }
+
   async getFactory() {
     return this.client.open(Factory.fromAddress(this.factoryAddress));
   }
 
-  // проверяем что Factory контракт развёрнут и доступен
+  // проверка активности контракта Factory
   async checkFactoryActive(): Promise<boolean> {
     try {
       const state = await this.client.getContractState(this.factoryAddress);
@@ -40,38 +47,60 @@ export class ContractService {
   }
 
   async getAllBrands(): Promise<Address[]> {
-    // проверяем кэш
+    // 1. Проверяем кеш
     if (this.brandsCache && Date.now() - this.brandsCache.timestamp < this.CACHE_TTL) {
       return this.brandsCache.brands;
     }
 
-    const factory = await this.getFactory();
-    const brands: Address[] = [];
-
-    try {
-      const brandCount = await factory.getNumBrands();
-      for (let i = 0n; i < brandCount; i++) {
-        const addr = await factory.getBrandAddress(i);
-        if (addr) brands.push(addr);
-      }
-      
-      // сохраняем в кэш
-      this.brandsCache = { brands, timestamp: Date.now() };
-    } catch (error) {
-      console.error('getAllBrands error:', error);
+    // 2. Если запрос уже идёт - возвращаем его Promise
+    if (this.getAllBrandsPromise) {
+      return this.getAllBrandsPromise;
     }
 
-    return brands;
+    // 3. Создаем новый запрос
+    this.getAllBrandsPromise = (async () => {
+      try {
+        const factory = await this.getFactory();
+        const brands: Address[] = [];
+        const brandCount = await factory.getNumBrands();
+        
+        console.log(`Fetching ${brandCount} brands...`);
+
+        for (let i = 0n; i < brandCount; i++) {
+          try {
+            // Добавляем задержку между запросами чтобы не ловить 429
+            await this.delay(500); 
+            const addr = await factory.getBrandAddress(i);
+            if (addr) brands.push(addr);
+          } catch (e) {
+            console.warn(`Failed to fetch brand ${i}`, e);
+          }
+        }
+        
+        this.brandsCache = { brands, timestamp: Date.now() };
+        return brands;
+      } catch (error) {
+        console.error('getAllBrands error:', error);
+        throw error;
+      } finally {
+        this.getAllBrandsPromise = null;
+      }
+    })();
+
+    return this.getAllBrandsPromise;
   }
 
   async getBrandInfo(brandAddress: Address) {
     const key = brandAddress.toString();
     
-    // проверяем кэш
+    // Проверяем кеш
     const cached = this.brandInfoCache.get(key);
     if (cached && Date.now() - cached.timestamp < this.CACHE_TTL) {
       return cached.info;
     }
+
+    // Задержка перед запросом инфо
+    await this.delay(300);
 
     const brand = this.client.open(BrandJetton.fromAddress(brandAddress));
 
@@ -89,7 +118,7 @@ export class ContractService {
       this.brandInfoCache.set(key, { info, timestamp: Date.now() });
       return info;
     } catch (error) {
-      console.error('getBrandInfo error:', error);
+      // не логируем ошибку для UI чтобы не спамить
       return null;
     }
   }
@@ -197,7 +226,7 @@ export class ContractService {
 
     return {
       address: params.brandAddress.toString(),
-      amount: toNano('0.15').toString(),
+      amount: toNano('0.5').toString(), // нужно минимум 0.5 TON для минта + деплой JettonWallet
       payload: beginCell().store(storeMintTo(message)).endCell().toBoc().toString('base64'),
     };
   }
