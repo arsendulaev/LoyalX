@@ -1635,6 +1635,7 @@ export type Factory$Data = {
     $$type: 'Factory$Data';
     nextBrandId: bigint;
     owner: Address;
+    brands: Dictionary<bigint, Address>;
 }
 
 export function storeFactory$Data(src: Factory$Data) {
@@ -1642,6 +1643,7 @@ export function storeFactory$Data(src: Factory$Data) {
         const b_0 = builder;
         b_0.storeUint(src.nextBrandId, 32);
         b_0.storeAddress(src.owner);
+        b_0.storeDict(src.brands, Dictionary.Keys.BigInt(257), Dictionary.Values.Address());
     };
 }
 
@@ -1649,25 +1651,29 @@ export function loadFactory$Data(slice: Slice) {
     const sc_0 = slice;
     const _nextBrandId = sc_0.loadUintBig(32);
     const _owner = sc_0.loadAddress();
-    return { $$type: 'Factory$Data' as const, nextBrandId: _nextBrandId, owner: _owner };
+    const _brands = Dictionary.load(Dictionary.Keys.BigInt(257), Dictionary.Values.Address(), sc_0);
+    return { $$type: 'Factory$Data' as const, nextBrandId: _nextBrandId, owner: _owner, brands: _brands };
 }
 
 export function loadTupleFactory$Data(source: TupleReader) {
     const _nextBrandId = source.readBigNumber();
     const _owner = source.readAddress();
-    return { $$type: 'Factory$Data' as const, nextBrandId: _nextBrandId, owner: _owner };
+    const _brands = Dictionary.loadDirect(Dictionary.Keys.BigInt(257), Dictionary.Values.Address(), source.readCellOpt());
+    return { $$type: 'Factory$Data' as const, nextBrandId: _nextBrandId, owner: _owner, brands: _brands };
 }
 
 export function loadGetterTupleFactory$Data(source: TupleReader) {
     const _nextBrandId = source.readBigNumber();
     const _owner = source.readAddress();
-    return { $$type: 'Factory$Data' as const, nextBrandId: _nextBrandId, owner: _owner };
+    const _brands = Dictionary.loadDirect(Dictionary.Keys.BigInt(257), Dictionary.Values.Address(), source.readCellOpt());
+    return { $$type: 'Factory$Data' as const, nextBrandId: _nextBrandId, owner: _owner, brands: _brands };
 }
 
 export function storeTupleFactory$Data(source: Factory$Data) {
     const builder = new TupleBuilder();
     builder.writeNumber(source.nextBrandId);
     builder.writeAddress(source.owner);
+    builder.writeCell(source.brands.size > 0 ? beginCell().storeDictDirect(source.brands, Dictionary.Keys.BigInt(257), Dictionary.Values.Address()).endCell() : null);
     return builder.build();
 }
 
@@ -1693,7 +1699,7 @@ function initFactory_init_args(src: Factory_init_args) {
 }
 
 async function Factory_init() {
-    const __code = Cell.fromHex('b5ee9c724102260100091c0003ccff008e88f4a413f4bcf2c80bed53208f513001d072d721d200d200fa4021103450666f04f86102f862ed44d0d2000197d31ffa40596c12943070f842e203925f03e001d70d1ff2e082218210323d29bfbae302018210946a98b6bae3025f03f2c082e1ed43d90103250137a66d2cfb513434800065f4c7fe90165b04a50c1c3e10b8b6cf1b08600200022104fe31d401d001d401d001d43023a4f8424343db3c5c705920f90022f9005ad76501d76582020134c8cb17cb0fcb0fcbffcbff71f90400c87401cb0212ca07cbffc9d0821008f0d1807070c8018210946a98b658cb1fcb3fc92305103441301670061035440302c8cf8580ca00cf8440ce01fa028069cf40025c6e016eb08a8ae204222324013288c87001ca0055315034ce01c8cecdc802c8ce12cd12cccdc90504fcff008e88f4a413f4bcf2c80bed53208f6c30eda2edfb01d072d721d200d200fa4021103450666f04f86102f862ed44d0d200018e1bfa40d401d001d401d0d401d001d4fa00d200f40430105710566c178e1bfa40d401d001d401d0d401d001d4301024102304d155026d707f58e208925f08e026d749c21fe30006f901e1060e12210202710709018fbe28ef6a268690000c70dfd206a00e800ea00e86a00e800ea7d0069007a0218082b882b360bc70dfd206a00e800ea00e86a00e800ea18081208118268aa8136b83fac716d9e3638c080002260202710a0c0193adbcf6a268690000c70dfd206a00e800ea00e86a00e800ea7d0069007a0218082b882b360bc70dfd206a00e800ea00e86a00e800ea18081208118268aa8136b83fac712a836d9e3638c00b0162f828db3c705920f90022f9005ad76501d76582020134c8cb17cb0fcb0fcbffcbff71f90400c87401cb0212ca07cbffc9d015018faf16f6a268690000c70dfd206a00e800ea00e86a00e800ea7d0069007a0218082b882b360bc70dfd206a00e800ea00e86a00e800ea18081208118268aa8136b83fac716d9e363ac00d011af8285270db3c305463305469701504ac06d31f2182101824f906ba8f3631fa40fa00305078db3c1068551521db3cc87f01ca0055605067ce04c8ce14cdc803c8ce13cdcc58fa0212ca0012f400cdc9ed54db31e02182107362d09cbae3022182105ab63224ba13140f1001e231d33f31fa00fa4030f8416f2410235f0381010b2a028101014133f40a6fa19401d70030925b6de2206eb38e97206ef2d08012a81068211068105710461035db3c065531925f03e210465513c87f01ca0055605067ce04c8ce14cdc803c8ce13cdcc58fa0212ca0012f400cdc9ed54db311402be8ed131fa40d31f305078db3c81010b403918810101216e955b59f4593098c801cf004133f441e210461035443012c87f01ca0055605067ce04c8ce14cdc803c8ce13cdcc58fa0212ca0012f400cdc9ed54db31e0018210946a98b6bae30206131100c2d33f30c8018210aff90f5758cb1fcb3fc91057104610354430f84270705003804201503304c8cf8580ca00cf8440ce01fa02806acf40f400c901fb00c87f01ca0055605067ce04c8ce14cdc803c8ce13cdcc58fa0212ca0012f400cdc9ed54db3102d882f05919afa6998886280924b765935e06a7933e95deadbd426d2a9ed343fc39b233ba8f41f8416f2410235f031056104510344137db3c55068218174876e80021db3cc87f01ca0055605067ce04c8ce14cdc803c8ce13cdcc58fa0212ca0012f400cdc9ed54e05f07f2c08213140010f84227c705f2e08402f05151a0f82813db3c5c705920f90022f9005ad76501d76582020134c8cb17cb0fcb0fcbffcbff71f90400c87401cb0212ca07cbffc9d082103b9aca007070f828218b08103510491023102dc855508210178d45195007cb1f15cb3f5003fa02ce01206e9430cf84809201cee201fa02cec9151048103850821520011688c87001ca005a02cecec9160228ff008e88f4a413f4bcf2c80bed5320e303ed43d917190149a65ec0bb513434800066be803e903e9015481b04e6be903e901640b4405c1678b6cf1b0d201801125cdb3c3054633052301e01ee3001d072d721d200d200fa4021103450666f04f86102f862ed44d0d200019afa00fa40fa4055206c139afa40fa405902d1017059e2048e36028020d7217021d749c21f9430d31f01de8210178d4519ba8e19d33ffa00596c21a002c87f01ca0055205afa0212cecec9ed54e05f04e002d70d1ff2e082211a03fe8210178d4519bae3020182100f8a7ea5ba8f66d33ffa00fa40fa40f40431fa00f8416f245b8200c13d3229c705f2f48200d5575375bef2f45164a15138db3c5c705920f90022f9005ad76501d76582020134c8cb17cb0fcb0fcbffcbff71f90400c87401cb0212ca07cbffc9d05076707f80402c4813507cc8e05f04f2c0821b1e1f02fa31d33ffa00fa40d72c01916d93fa4001e201fa005164a0226eb39436135f03e30d206eb38e53206ef2d0807070804204c8018210d53276db58cb1fcb3fc910344130146d50436d5033c8cf8580ca00cf8440ce01fa028069cf40025c6e016eb0935bcf819d58cf8680cf8480f400f400cf81e2f400c901fb00915be2021c1d00bc22206ef2d080702747135069c8553082107362d09c5005cb1f13cb3f01fa02cecec9103441407050346d036d5520c8cf8580ca00cf8440ce01fa028069cf40025c6e016eb0935bcf819d58cf8680cf8480f400f400cf81e2f400c901fb000020c87f01ca0055205afa0212cecec9ed540018f82ac87001ca005a02cecec900e855508210178d45195007cb1f15cb3f5003fa02ce01206e9430cf84809201cee201fa02cec91056105710344013071036453304c8cf8580ca00cf8440ce01fa028069cf40025c6e016eb0935bcf819d58cf8680cf8480f400f400cf81e2f400c901fb0002c87f01ca0055205afa0212cecec9ed54006e70061035440302c8cf8580ca00cf8440ce01fa028069cf40025c6e016eb0935bcf819d58cf8680cf8480f400f400cf81e2f400c901fb000006ed43d900065bcf81001a58cf8680cf8480f400f400cf810086f400c901fb00f8421023c8552082103babc94f5004cb1f12cb1fcecec9c88258c000000000000000000000000101cb67ccc970fb0001c87f01ca005902cb1fcec9ed540084d33f30c8018210aff90f5758cb1fcb3fc912f84270705003804201503304c8cf8580ca00cf8440ce01fa02806acf40f400c901fb00c87f01ca005902cb1fcec9ed54ae586004');
+    const __code = Cell.fromHex('b5ee9c724102280100097a0003d6ff008e88f4a413f4bcf2c80bed53208f563001d072d721d200d200fa4021103450666f04f86102f862ed44d0d200019ad31ffa40f40455206c1396306d70f84258e204925f04e002d70d1ff2e082218210323d29bfbae302018210946a98b6bae3025f04f2c082e1ed43d9010627020378e00204013fbb4b3ed44d0d200019ad31ffa40f40455206c1396306d70f84258e2db3c6c318030002220143ba368ed44d0d200019ad31ffa40f40455206c1396306d70f84258e25502db3c6c31805001c810101220259f40c6fa192306ddf02fe31d401d001d401d001d43023a4f8424343db3c5c705920f90022f9005ad76501d76582020134c8cb17cb0fcb0fcbffcbff71f90400c87401cb0212ca07cbffc9d0068101015357206e953059f45a30944133f414e2821008f0d1807070c8018210946a98b658cb1fcb3fc92905103441301670061035440302c8cf8580ca000725013288c87001ca0055315034ce01c8cecdc802c8ce12cd12cccdc90804fcff008e88f4a413f4bcf2c80bed53208f6c30eda2edfb01d072d721d200d200fa4021103450666f04f86102f862ed44d0d200018e1bfa40d401d001d401d0d401d001d4fa00d200f40430105710566c178e1bfa40d401d001d401d0d401d001d4301024102304d155026d707f58e208925f08e026d749c21fe30006f901e1091115240202710a0c018fbe28ef6a268690000c70dfd206a00e800ea00e86a00e800ea7d0069007a0218082b882b360bc70dfd206a00e800ea00e86a00e800ea18081208118268aa8136b83fac716d9e3638c0b0002260202710d0f0193adbcf6a268690000c70dfd206a00e800ea00e86a00e800ea7d0069007a0218082b882b360bc70dfd206a00e800ea00e86a00e800ea18081208118268aa8136b83fac712a836d9e3638c00e0162f828db3c705920f90022f9005ad76501d76582020134c8cb17cb0fcb0fcbffcbff71f90400c87401cb0212ca07cbffc9d018018faf16f6a268690000c70dfd206a00e800ea00e86a00e800ea7d0069007a0218082b882b360bc70dfd206a00e800ea00e86a00e800ea18081208118268aa8136b83fac716d9e363ac010011af8285270db3c305463305469701804ac06d31f2182101824f906ba8f3631fa40fa00305078db3c1068551521db3cc87f01ca0055605067ce04c8ce14cdc803c8ce13cdcc58fa0212ca0012f400cdc9ed54db31e02182107362d09cbae3022182105ab63224ba1617121301e231d33f31fa00fa4030f8416f2410235f0381010b2a028101014133f40a6fa19401d70030925b6de2206eb38e97206ef2d08012a81068211068105710461035db3c065531925f03e210465513c87f01ca0055605067ce04c8ce14cdc803c8ce13cdcc58fa0212ca0012f400cdc9ed54db311702be8ed131fa40d31f305078db3c81010b403918810101216e955b59f4593098c801cf004133f441e210461035443012c87f01ca0055605067ce04c8ce14cdc803c8ce13cdcc58fa0212ca0012f400cdc9ed54db31e0018210946a98b6bae30206161400c2d33f30c8018210aff90f5758cb1fcb3fc91057104610354430f84270705003804201503304c8cf8580ca00cf8440ce01fa02806acf40f400c901fb00c87f01ca0055605067ce04c8ce14cdc803c8ce13cdcc58fa0212ca0012f400cdc9ed54db3102d882f05919afa6998886280924b765935e06a7933e95deadbd426d2a9ed343fc39b233ba8f41f8416f2410235f031056104510344137db3c55068218174876e80021db3cc87f01ca0055605067ce04c8ce14cdc803c8ce13cdcc58fa0212ca0012f400cdc9ed54e05f07f2c08216170010f84227c705f2e08402f05151a0f82813db3c5c705920f90022f9005ad76501d76582020134c8cb17cb0fcb0fcbffcbff71f90400c87401cb0212ca07cbffc9d082103b9aca007070f828218b08103510491023102dc855508210178d45195007cb1f15cb3f5003fa02ce01206e9430cf84809201cee201fa02cec9151048103850821823011688c87001ca005a02cecec9190228ff008e88f4a413f4bcf2c80bed5320e303ed43d91a1c0149a65ec0bb513434800066be803e903e9015481b04e6be903e901640b4405c1678b6cf1b0d201b01125cdb3c3054633052302101ee3001d072d721d200d200fa4021103450666f04f86102f862ed44d0d200019afa00fa40fa4055206c139afa40fa405902d1017059e2048e36028020d7217021d749c21f9430d31f01de8210178d4519ba8e19d33ffa00596c21a002c87f01ca0055205afa0212cecec9ed54e05f04e002d70d1ff2e082211d03fe8210178d4519bae3020182100f8a7ea5ba8f66d33ffa00fa40fa40f40431fa00f8416f245b8200c13d3229c705f2f48200d5575375bef2f45164a15138db3c5c705920f90022f9005ad76501d76582020134c8cb17cb0fcb0fcbffcbff71f90400c87401cb0212ca07cbffc9d05076707f80402c4813507cc8e05f04f2c0821e212202fa31d33ffa00fa40d72c01916d93fa4001e201fa005164a0226eb39436135f03e30d206eb38e53206ef2d0807070804204c8018210d53276db58cb1fcb3fc910344130146d50436d5033c8cf8580ca00cf8440ce01fa028069cf40025c6e016eb0935bcf819d58cf8680cf8480f400f400cf81e2f400c901fb00915be2021f2000bc22206ef2d080702747135069c8553082107362d09c5005cb1f13cb3f01fa02cecec9103441407050346d036d5520c8cf8580ca00cf8440ce01fa028069cf40025c6e016eb0935bcf819d58cf8680cf8480f400f400cf81e2f400c901fb000020c87f01ca0055205afa0212cecec9ed540018f82ac87001ca005a02cecec900e855508210178d45195007cb1f15cb3f5003fa02ce01206e9430cf84809201cee201fa02cec91056105710344013071036453304c8cf8580ca00cf8440ce01fa028069cf40025c6e016eb0935bcf819d58cf8680cf8480f400f400cf81e2f400c901fb0002c87f01ca0055205afa0212cecec9ed54006e70061035440302c8cf8580ca00cf8440ce01fa028069cf40025c6e016eb0935bcf819d58cf8680cf8480f400f400cf81e2f400c901fb000006ed43d901d689cf16ce01fa028069cf40025c6e016eb0935bcf819d58cf8680cf8480f400f400cf81e2f400c901fb00f8424350c8552082103babc94f5004cb1f12cb1fcecec9c88258c000000000000000000000000101cb67ccc970fb0002c87f01ca0055205023cb1fcef400c9ed5426000110008cd33f30c8018210aff90f5758cb1fcb3fc913f84270705003804201503304c8cf8580ca00cf8440ce01fa02806acf40f400c901fb00c87f01ca0055205023cb1fcef400c9ed543217d028');
     const builder = beginCell();
     builder.storeUint(0, 1);
     initFactory_init_args({ $$type: 'Factory_init_args' })(builder);
@@ -1773,13 +1779,13 @@ export const Factory_errors_backward = {
     "Invalid serialization prefix": 129,
     "Invalid incoming message": 130,
     "Constraints error": 131,
-    "Access denied ownable": 132,
+    "Access denied": 132,
     "Contract stopped": 133,
     "Invalid argument": 134,
     "Code of a contract was not found": 135,
     "Invalid standard address": 136,
     "Not a basechain address": 138,
-    "Access denied": 49469,
+    "Access denied (custom)": 49469,
     "Insufficient balance": 54615,
 } as const
 
@@ -1811,7 +1817,7 @@ const Factory_types: ABIType[] = [
     {"name":"JettonWalletData","header":null,"fields":[{"name":"balance","type":{"kind":"simple","type":"uint","optional":false,"format":"coins"}},{"name":"owner","type":{"kind":"simple","type":"address","optional":false}},{"name":"master","type":{"kind":"simple","type":"address","optional":false}},{"name":"walletCode","type":{"kind":"simple","type":"cell","optional":false}}]},
     {"name":"CreateBrand","header":842869183,"fields":[{"name":"brandName","type":{"kind":"simple","type":"string","optional":false}},{"name":"ticker","type":{"kind":"simple","type":"string","optional":false}},{"name":"content","type":{"kind":"simple","type":"cell","optional":false}}]},
     {"name":"BrandCreated","header":1001113935,"fields":[{"name":"brandId","type":{"kind":"simple","type":"uint","optional":false,"format":32}},{"name":"brandAddress","type":{"kind":"simple","type":"address","optional":false}},{"name":"owner","type":{"kind":"simple","type":"address","optional":false}}]},
-    {"name":"Factory$Data","header":null,"fields":[{"name":"nextBrandId","type":{"kind":"simple","type":"uint","optional":false,"format":32}},{"name":"owner","type":{"kind":"simple","type":"address","optional":false}}]},
+    {"name":"Factory$Data","header":null,"fields":[{"name":"nextBrandId","type":{"kind":"simple","type":"uint","optional":false,"format":32}},{"name":"owner","type":{"kind":"simple","type":"address","optional":false}},{"name":"brands","type":{"kind":"dict","key":"int","value":"address"}}]},
 ]
 
 const Factory_opcodes = {
@@ -1832,10 +1838,12 @@ const Factory_opcodes = {
 
 const Factory_getters: ABIGetter[] = [
     {"name":"numBrands","methodId":111795,"arguments":[],"returnType":{"kind":"simple","type":"int","optional":false,"format":257}},
+    {"name":"brandAddress","methodId":123752,"arguments":[{"name":"id","type":{"kind":"simple","type":"int","optional":false,"format":257}}],"returnType":{"kind":"simple","type":"address","optional":true}},
 ]
 
 export const Factory_getterMapping: { [key: string]: string } = {
     'numBrands': 'getNumBrands',
+    'brandAddress': 'getBrandAddress',
 }
 
 const Factory_receivers: ABIReceiver[] = [
@@ -1897,6 +1905,14 @@ export class Factory implements Contract {
         const builder = new TupleBuilder();
         const source = (await provider.get('numBrands', builder.build())).stack;
         const result = source.readBigNumber();
+        return result;
+    }
+    
+    async getBrandAddress(provider: ContractProvider, id: bigint) {
+        const builder = new TupleBuilder();
+        builder.writeNumber(id);
+        const source = (await provider.get('brandAddress', builder.build())).stack;
+        const result = source.readAddressOpt();
         return result;
     }
     
