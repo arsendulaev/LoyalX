@@ -58,7 +58,7 @@ export function ExchangeRatesScreen() {
     };
 
     load();
-  }, [connected, address, contractService]);
+  }, [connected, address]);
 
   const myBrands = brands.filter(b => b.isOwner);
   const otherBrands = brands.filter(b => b.address.toString() !== myBrand);
@@ -76,11 +76,9 @@ export function ExchangeRatesScreen() {
     try {
       const targetBrandAddress = Address.parse(targetBrand);
       const myBrandAddress = Address.parse(myBrand);
-      const jettonWalletAddr = await contractService.getUserWalletAddress(targetBrandAddress, address);
-
       const msg = contractService.buildSetExchangeRatePayload({
         brandAddress: myBrandAddress,
-        jettonWalletAddress: jettonWalletAddr,
+        jettonMasterAddress: targetBrandAddress,
         rate: BigInt(Math.round(Number(rate) * 100)),
       });
 
@@ -187,7 +185,7 @@ export function ExchangeRatesScreen() {
                 {rate} {myBrands.find(b => b.address.toString() === myBrand)?.symbol || '???'}
               </p>
               <p className="text-blue-500">
-                Курс устанавливается для текущего подключённого кошелька
+                Курс привязан к мастер-адресу токена и работает для всех пользователей
               </p>
             </div>
           )}

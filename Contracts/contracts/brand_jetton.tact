@@ -1,31 +1,24 @@
 import "@stdlib/deploy";
 import "@stdlib/ownable";
-import "./jetton_wallet";
-
-message SetExchangeRate {
-    jettonWalletAddress: Address;
-    rate: Int as uint32;
-}
-
-message MintTo {
-    to: Address;
-    amount: Int as coins;
-}
+import "./messages.tact";
+import "./jetton_wallet.tact";
 
 contract BrandJetton with Deployable, Ownable {
     owner: Address;
-    symbol: String;
     name: String;
-    content: Cell;
+    symbol: String;
+    description: String;
+    image: String;
     totalSupply: Int as coins;
     mintable: Bool;
     exchangeRates: map<Address, Int>;
 
-    init(owner: Address, symbol: String, name: String, content: Cell) {
+    init(owner: Address, name: String, symbol: String, description: String, image: String) {
         self.owner = owner;
-        self.symbol = symbol;
         self.name = name;
-        self.content = content;
+        self.symbol = symbol;
+        self.description = description;
+        self.image = image;
         self.totalSupply = 0;
         self.mintable = true;
     }
@@ -33,7 +26,7 @@ contract BrandJetton with Deployable, Ownable {
     receive("Mint") {
         let ctx: Context = context();
         self.requireOwner();
-        self.mint(ctx.sender, ton("100"), ctx.sender);
+        self.mint(ctx.sender, 1000000000000, ctx.sender);
     }
 
     receive(msg: MintTo) {
@@ -42,35 +35,110 @@ contract BrandJetton with Deployable, Ownable {
     }
 
     receive(msg: TransferNotification) {
-        let ctx: Context = context(); 
-        let rate: Int? = self.exchangeRates.get(ctx.sender);
+        let ctx: Context = context();
 
-        if (rate != null) {
-            let amountToMint: Int = msg.amount * rate!!;
-            self.mint(msg.sender, amountToMint, msg.sender);
-        }
+        require(msg.forwardPayload.bits() >= 267, "Swap: invalid forwardPayload");
+        let masterAddress: Address = msg.forwardPayload.loadAddress();
+
+        let rate: Int? = self.exchangeRates.get(masterAddress);
+
+        require(rate != null, "Swap: no exchange rate");
+
+        let amountToMint: Int = msg.amount * rate!!;
+
+        send(SendParameters {
+            to: ctx.sender,
+            value: ton("0.1"),
+            bounce: true,
+            body: Burn {
+                queryId: msg.queryId,
+                amount: msg.amount,
+                responseDestination: msg.sender,
+            }.toCell(),
+        });
+
+        self.mint(msg.sender, amountToMint, msg.sender);
+    }
+
+    receive(msg: InternalTransfer) {
+        require(msg.forwardPayload.bits() >= 267, "Swap: invalid forwardPayload");
+        let masterAddress: Address = msg.forwardPayload.loadAddress();
+
+        let rate: Int? = self.exchangeRates.get(masterAddress);
+
+        require(rate != null, "Swap: no exchange rate");
+
+        let amountToMint: Int = msg.amount * rate!!;
+
+        send(SendParameters {
+            to: msg.from,
+            value: ton("0.1"),
+            bounce: true,
+            body: Burn {
+                queryId: msg.queryId,
+                amount: msg.amount,
+                responseDestination: msg.responseDestination,
+            }.toCell(),
+        });
+
+        self.mint(msg.from, amountToMint, msg.responseDestination);
     }
 
     receive(msg: SetExchangeRate) {
         self.requireOwner();
-        self.exchangeRates.set(msg.jettonWalletAddress, msg.rate);
+        self.exchangeRates.set(msg.jettonMasterAddress, msg.rate);
+    }
+
+    receive(msg: BurnNotification) {
+        self.totalSupply -= msg.amount;
+
+        if (msg.responseDestination != null) {
+            send(SendParameters {
+                to: msg.responseDestination!!,
+                value: 0,
+                bounce: false,
+                mode: SendRemainingValue + SendIgnoreErrors,
+                body: Excesses { queryId: msg.queryId }.toCell(),
+            });
+        }
+    }
+
+    receive(msg: Burn) {
+        let ctx: Context = context();
+        let expectedWallet: StateInit = initOf JettonWallet(ctx.sender, myAddress());
+        let expectedWalletAddress: Address = contractAddress(expectedWallet);
+        require(ctx.sender == expectedWalletAddress, "Burn: invalid jetton wallet");
+
+        self.totalSupply -= msg.amount;
+
+        if (msg.responseDestination != null) {
+            send(SendParameters {
+                to: msg.responseDestination!!,
+                value: 0,
+                bounce: false,
+                mode: SendRemainingValue + SendIgnoreErrors,
+                body: Excesses { queryId: msg.queryId }.toCell(),
+            });
+        }
     }
 
     fun mint(to: Address, amount: Int, response_destination: Address?) {
+        require(self.mintable, "Minting is disabled");
         self.totalSupply += amount;
         
         let winit: StateInit = initOf JettonWallet(to, myAddress());
         let walletAddress: Address = contractAddress(winit);
+        
         send(SendParameters{
             to: walletAddress,
-            value: ton("1"),
-            bounce: false,
+            value: ton("0.05"),
+            bounce: true,
             body: InternalTransfer{ 
                 queryId: 0,
                 amount: amount,
                 from: myAddress(),
                 responseDestination: response_destination,
-                forwardTonAmount: 0,
+                forwardTonAmount: ton("0.01"),
                 forwardPayload: emptySlice()
             }.toCell(),
             code: winit.code,
@@ -81,11 +149,12 @@ contract BrandJetton with Deployable, Ownable {
     }
 
     get fun get_jetton_data(): JettonData {
-        return JettonData{ 
-            totalSupply: self.totalSupply, 
-            mintable: self.mintable, 
-            admin: self.owner, 
-            content: self.content, 
+        return JettonData{
+            totalSupply: self.totalSupply,
+            mintable: self.mintable,
+            admin: self.owner,
+            name: self.name,
+            symbol: self.symbol,
             walletCode: initOf JettonWallet(self.owner, myAddress()).code
         };
     }
@@ -94,12 +163,4 @@ contract BrandJetton with Deployable, Ownable {
         let winit: StateInit = initOf JettonWallet(owner, myAddress());
         return contractAddress(winit);
     }
-}
-
-struct JettonData {
-    totalSupply: Int;
-    mintable: Bool;
-    admin: Address;
-    content: Cell;
-    walletCode: Cell;
 }

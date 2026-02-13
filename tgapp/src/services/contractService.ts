@@ -1,24 +1,37 @@
 import { Address, toNano, beginCell, Cell } from '@ton/core';
 import { TonClient } from '@ton/ton';
-import { Factory, storeCreateBrand } from '../contracts/Factory';
-import { BrandJetton, storeMintTo, storeSetExchangeRate } from '../contracts/BrandJetton';
-import { JettonWallet, storeTransfer } from '../contracts/JettonWallet';
-import type { CreateBrand } from '../contracts/Factory';
-import type { MintTo, SetExchangeRate } from '../contracts/BrandJetton';
-import type { Transfer } from '../contracts/JettonWallet';
+import { Factory, storeCreateBrand, CreateBrand } from '../contracts/Factory';
+import { BrandJetton, storeMintTo, storeSetExchangeRate, MintTo, SetExchangeRate } from '../contracts/BrandJetton';
+import { JettonWallet, storeTransfer, Transfer } from '../contracts/JettonWallet';
 
 export class ContractService {
   private client: TonClient;
   private factoryAddress: Address;
+
+  private brandsCache: { brands: Address[]; timestamp: number } | null = null;
+  private brandInfoCache: Map<string, { info: any; timestamp: number }> = new Map();
+  private readonly CACHE_TTL = 120000;
+  private getAllBrandsPromise: Promise<Address[]> | null = null;
 
   constructor(client: TonClient, factoryAddress: string) {
     this.client = client;
     this.factoryAddress = Address.parse(factoryAddress);
   }
 
+  private async delay(ms: number) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  clearCache() {
+    this.brandsCache = null;
+    this.brandInfoCache.clear();
+    this.getAllBrandsPromise = null;
+  }
+
   async getFactory() {
     return this.client.open(Factory.fromAddress(this.factoryAddress));
   }
+
   async checkFactoryActive(): Promise<boolean> {
     try {
       const state = await this.client.getContractState(this.factoryAddress);
@@ -29,38 +42,80 @@ export class ContractService {
   }
 
   async getAllBrands(): Promise<Address[]> {
-    const factory = await this.getFactory();
-    const brands: Address[] = [];
-
-    try {
-      const brandCount = await factory.getNumBrands();
-      for (let i = 0n; i < brandCount; i++) {
-        const addr = await factory.getBrandAddress(i);
-        if (addr) brands.push(addr);
-      }
-    } catch (error) {
-      console.error('getAllBrands error:', error);
+    if (this.brandsCache && Date.now() - this.brandsCache.timestamp < this.CACHE_TTL) {
+      return this.brandsCache.brands;
     }
 
-    return brands;
+    if (this.getAllBrandsPromise) {
+      return this.getAllBrandsPromise;
+    }
+    this.getAllBrandsPromise = (async () => {
+      try {
+        const factory = await this.getFactory();
+        const brands: Address[] = [];
+        const brandCount = await factory.getNumBrands();
+        
+        console.log(`Fetching ${brandCount} brands...`);
+
+        for (let i = 0n; i < brandCount; i++) {
+          try {
+            await this.delay(1500); 
+            const addr = await factory.getBrandAddress(i);
+            if (addr) brands.push(addr);
+          } catch (e) {
+            console.warn(`Failed to fetch brand ${i}`, e);
+          }
+        }
+        
+        this.brandsCache = { brands, timestamp: Date.now() };
+        return brands;
+      } catch (error) {
+        console.error('getAllBrands error:', error);
+        throw error;
+      } finally {
+        this.getAllBrandsPromise = null;
+      }
+    })();
+
+    return this.getAllBrandsPromise;
   }
 
-  async getBrandInfo(brandAddress: Address) {
+  async getBrandInfo(brandAddress: Address, retries = 3) {
+    const key = brandAddress.toString();
+    const cached = this.brandInfoCache.get(key);
+    if (cached && Date.now() - cached.timestamp < this.CACHE_TTL) {
+      return cached.info;
+    }
+    await this.delay(1000);
+
     const brand = this.client.open(BrandJetton.fromAddress(brandAddress));
 
-    try {
-      const data = await brand.getGetJettonData();
-      return {
-        totalSupply: data.totalSupply,
-        mintable: data.mintable,
-        admin: data.admin,
-        content: data.content,
-        walletCode: data.walletCode,
-      };
-    } catch (error) {
-      console.error('getBrandInfo error:', error);
-      return null;
+    for (let attempt = 0; attempt < retries; attempt++) {
+      try {
+        const data = await brand.getGetJettonData();
+        const info = {
+          totalSupply: data.totalSupply,
+          mintable: data.mintable,
+          admin: data.admin,
+          name: data.name,
+          symbol: data.symbol,
+          walletCode: data.walletCode,
+        };
+        this.brandInfoCache.set(key, { info, timestamp: Date.now() });
+        return info;
+      } catch (error: any) {
+        const is429 = error?.response?.status === 429 || error?.message?.includes('429');
+        if (is429 && attempt < retries - 1) {
+          const backoff = (attempt + 1) * 2000;
+          console.warn(`getBrandInfo 429 for ${brandAddress.toString()}, retry ${attempt + 1}/${retries} after ${backoff}ms`);
+          await this.delay(backoff);
+          continue;
+        }
+        console.error('getBrandInfo error for', brandAddress.toString(), error);
+        return null;
+      }
     }
+    return null;
   }
 
   parseBrandMetadata(content: Cell): { name: string; symbol: string; description: string; image: string } {
@@ -68,16 +123,24 @@ export class ContractService {
     try {
       const slice = content.beginParse();
       const tag = slice.loadUint(8);
+      console.log('parseBrandMetadata: tag =', tag);
       if (tag === 0x01) {
-        const json = JSON.parse(slice.loadStringTail());
+        const jsonString = slice.loadStringTail();
+        console.log('parseBrandMetadata: JSON string =', jsonString);
+        const json = JSON.parse(jsonString);
+        console.log('parseBrandMetadata: parsed =', json);
         return {
           name: json.name || defaults.name,
           symbol: json.symbol || defaults.symbol,
           description: json.description || defaults.description,
           image: json.image || defaults.image,
         };
+      } else {
+        console.warn('parseBrandMetadata: unexpected tag', tag, 'expected 0x01');
       }
-    } catch {}
+    } catch (error) {
+      console.error('parseBrandMetadata error:', error);
+    }
     return defaults;
   }
 
@@ -97,21 +160,29 @@ export class ContractService {
     }
   }
 
-  async getUserBalances(userAddress: Address) {
+  async getUserBalances(userAddress: Address, includeZero = true) {
     const brands = await this.getAllBrands();
+    console.log('getUserBalances: found', brands.length, 'brands');
     const results: { brand: Address; balance: bigint; meta: { name: string; symbol: string; description: string; image: string } }[] = [];
 
     for (const brandAddr of brands) {
       try {
-        const [balance, info] = await Promise.all([
-          this.getUserBalance(brandAddr, userAddress),
-          this.getBrandInfo(brandAddr),
-        ]);
-        const meta = info?.content ? this.parseBrandMetadata(info.content) : { name: 'Unknown', symbol: '???', description: '', image: '' };
+        console.log('getUserBalances: processing brand', brandAddr.toString());
+        const info = await this.getBrandInfo(brandAddr);
+        await this.delay(800);
+        const balance = await this.getUserBalance(brandAddr, userAddress);
+        console.log('getUserBalances: brand', brandAddr.toString(), 'balance:', balance, 'info:', info);
+        if (!includeZero && balance === 0n) continue;
+        
+        const meta = info ? { name: info.name || 'Unknown', symbol: info.symbol || '???', description: '', image: '' } : { name: 'Unknown', symbol: '???', description: '', image: '' };
+        console.log('getUserBalances: parsed meta for', brandAddr.toString(), ':', meta);
         results.push({ brand: brandAddr, balance, meta });
-      } catch {}
+      } catch (err) {
+        console.error('getUserBalances error for brand', brandAddr.toString(), err);
+      }
     }
 
+    console.log('getUserBalances: returning', results.length, 'results');
     return results;
   }
 
@@ -120,26 +191,17 @@ export class ContractService {
     amount: string;
     payload: string;
   } {
-    const content = beginCell()
-      .storeUint(0x01, 8)
-      .storeStringTail(JSON.stringify({
-        name: params.name,
-        description: params.description,
-        symbol: params.symbol,
-        image: params.image,
-      }))
-      .endCell();
-
     const message: CreateBrand = {
       $$type: 'CreateBrand',
-      brandName: params.name,
-      ticker: params.symbol,
-      content,
+      name: params.name,
+      symbol: params.symbol,
+      description: params.description,
+      image: params.image,
     };
 
     return {
       address: this.factoryAddress.toString(),
-      amount: toNano('0.5').toString(),
+      amount: toNano('0.4').toString(),
       payload: beginCell().store(storeCreateBrand(message)).endCell().toBoc().toString('base64'),
     };
   }
@@ -157,14 +219,14 @@ export class ContractService {
 
     return {
       address: params.brandAddress.toString(),
-      amount: toNano('0.15').toString(),
+      amount: toNano('0.2').toString(),
       payload: beginCell().store(storeMintTo(message)).endCell().toBoc().toString('base64'),
     };
   }
 
   buildSetExchangeRatePayload(params: {
     brandAddress: Address;
-    jettonWalletAddress: Address;
+    jettonMasterAddress: Address;
     rate: bigint;
   }): {
     address: string;
@@ -173,7 +235,7 @@ export class ContractService {
   } {
     const message: SetExchangeRate = {
       $$type: 'SetExchangeRate',
-      jettonWalletAddress: params.jettonWalletAddress,
+      jettonMasterAddress: params.jettonMasterAddress,
       rate: params.rate,
     };
 
@@ -204,7 +266,7 @@ export class ContractService {
       responseDestination: params.userAddress,
       customPayload: null,
       forwardTonAmount: toNano('0.05'),
-      forwardPayload: beginCell().endCell().asSlice(),
+      forwardPayload: beginCell().storeAddress(params.fromBrandAddress).endCell().asSlice(),
     };
 
     return {
@@ -220,6 +282,13 @@ export class ContractService {
       return true;
     } catch {
       return false;
+    }
+  }
+  static toBounceable(addr: string): string {
+    try {
+      return Address.parse(addr).toString();
+    } catch {
+      return addr;
     }
   }
 }

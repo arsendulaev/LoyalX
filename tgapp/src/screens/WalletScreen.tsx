@@ -16,27 +16,43 @@ export function WalletScreen() {
   const [balances, setBalances] = useState<TokenBalance[]>([]);
   const [loading, setLoading] = useState(false);
 
+  const loadBalances = async (forceRefresh = false) => {
+    if (!connected || !address || !contractService) return;
+    
+    if (forceRefresh) {
+      contractService.clearCache();
+    }
+    
+    setLoading(true);
+    try {
+      console.log('Loading balances for:', address.toString());
+      const data = await contractService.getUserBalances(address, true);
+      console.log('Loaded balances:', data.length, 'brands');
+      const uniqueBalances = new Map<string, TokenBalance>();
+      data.forEach(d => {
+        const key = d.brand.toString();
+        if (!uniqueBalances.has(key)) {
+          uniqueBalances.set(key, {
+            brand: d.brand,
+            balance: d.balance,
+            name: d.meta.name,
+            symbol: d.meta.symbol,
+          });
+          console.log(`Brand ${d.meta.name} (${d.meta.symbol}):`, Number(d.balance) / 1e9, 'tokens');
+        }
+      });
+      
+      setBalances(Array.from(uniqueBalances.values()));
+    } catch (error) {
+      console.error('WalletScreen load error:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (!connected || !address || !contractService) return;
-
-    const load = async () => {
-      setLoading(true);
-      try {
-        const data = await contractService.getUserBalances(address);
-        setBalances(data.map(d => ({
-          brand: d.brand,
-          balance: d.balance,
-          name: d.meta.name,
-          symbol: d.meta.symbol,
-        })));
-      } catch (error) {
-        console.error('WalletScreen load error:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    load();
+    loadBalances();
   }, [connected, address, contractService]);
 
   if (!connected) {
@@ -60,7 +76,19 @@ export function WalletScreen() {
   return (
     <div className="space-y-4">
       <div className="bg-white/80 backdrop-blur-sm rounded-2xl p-4 shadow-sm border border-gray-100">
-        <p className="text-xs text-gray-400 mb-1">Мой кошелёк</p>
+        <div className="flex items-start justify-between mb-1">
+          <p className="text-xs text-gray-400">Мой кошелёк</p>
+          <button
+            onClick={() => loadBalances(true)}
+            disabled={loading}
+            className="text-indigo-600 hover:text-indigo-700 disabled:opacity-50"
+            title="Обновить балансы"
+          >
+            <svg className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+          </button>
+        </div>
         <p className="font-mono text-xs text-gray-700 break-all leading-relaxed">
           {address?.toString()}
         </p>
@@ -76,30 +104,37 @@ export function WalletScreen() {
           </div>
         ) : balances.length === 0 ? (
           <div className="text-center py-8">
-            <p className="text-gray-400 text-sm">Нет токенов</p>
-            <p className="text-gray-300 text-xs mt-1">Получите от брендов или обменяйте</p>
+            <p className="text-gray-400 text-sm">Нет брендов</p>
+            <p className="text-gray-300 text-xs mt-1">Создайте бренд и начислите токены</p>
           </div>
         ) : (
           <div className="space-y-2">
-            {balances.map(({ brand, balance, name, symbol }) => (
-              <div
-                key={brand.toString()}
-                className="flex items-center justify-between p-3 bg-gray-50/80 rounded-xl"
-              >
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium text-gray-800 truncate">{name}</p>
-                  <p className="text-xs text-gray-400 font-mono">
-                    {brand.toString().slice(0, 6)}...{brand.toString().slice(-4)}
-                  </p>
+            {balances.map(({ brand, balance, name, symbol }) => {
+              const isZero = balance === 0n;
+              return (
+                <div
+                  key={brand.toString()}
+                  className={`flex items-center justify-between p-3 rounded-xl ${
+                    isZero ? 'bg-gray-100/50 opacity-60' : 'bg-gray-50/80'
+                  }`}
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className={`text-sm font-medium truncate ${isZero ? 'text-gray-500' : 'text-gray-800'}`}>
+                      {name} {isZero && <span className="text-xs text-gray-400">(нет токенов)</span>}
+                    </p>
+                    <p className="text-xs text-gray-400 font-mono">
+                      {brand.toString().slice(0, 6)}...{brand.toString().slice(-4)}
+                    </p>
+                  </div>
+                  <div className="text-right ml-3">
+                    <p className={`text-base font-bold ${isZero ? 'text-gray-400' : 'text-indigo-600'}`}>
+                      {(Number(balance) / 1e9).toFixed(2)}
+                    </p>
+                    <p className="text-xs text-gray-400">{symbol}</p>
+                  </div>
                 </div>
-                <div className="text-right ml-3">
-                  <p className="text-base font-bold text-indigo-600">
-                    {(Number(balance) / 1e9).toFixed(2)}
-                  </p>
-                  <p className="text-xs text-gray-400">{symbol}</p>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

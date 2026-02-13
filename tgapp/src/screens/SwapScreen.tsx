@@ -51,7 +51,7 @@ export function SwapScreen() {
     };
 
     load();
-  }, [connected, contractService]);
+  }, [connected]); // убрал contractService из dependencies
 
   const handleSwap = async (e: React.FormEvent) => {
     e.preventDefault();

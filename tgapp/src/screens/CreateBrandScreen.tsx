@@ -132,7 +132,7 @@ export function CreateBrandScreen() {
         </div>
 
         <div className="bg-indigo-50/80 rounded-xl p-3 text-xs text-indigo-600 space-y-1">
-          <p>Газ: ~0.5 TON</p>
+          <p>Газ: ~0.4 TON</p>
           <p>Вы станете владельцем контракта бренда</p>
         </div>
 

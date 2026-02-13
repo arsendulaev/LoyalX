@@ -14,4 +14,8 @@ export async function run(provider: NetworkProvider) {
     );
 
     await provider.waitForDeploy(brandJetton.address);
+<<<<<<< HEAD
+=======
+
+>>>>>>> 7e73c96 (fix: compilation error in brand_jetton.tact and improve swap logic)
 }

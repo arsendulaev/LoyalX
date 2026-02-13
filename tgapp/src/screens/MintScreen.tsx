@@ -30,19 +30,41 @@ export function MintScreen() {
       setLoadingBrands(true);
       try {
         const brandAddresses = await contractService.getAllBrands();
+        console.log('MintScreen: Total brands found:', brandAddresses.length);
+        console.log('MintScreen: User address:', address.toString({ bounceable: true }));
+        
         const results: Brand[] = [];
 
         for (const brandAddr of brandAddresses) {
-          const info = await contractService.getBrandInfo(brandAddr);
-          if (!info || info.admin.toString() !== address.toString()) continue;
+          try {
+            const info = await contractService.getBrandInfo(brandAddr);
+            if (!info) continue;
+            const adminAddress = info.admin.toString({ bounceable: true });
+            const userAddress = address.toString({ bounceable: true });
+            
+            console.log('Brand check:', {
+              brand: brandAddr.toString().slice(0, 10) + '...',
+              admin: adminAddress,
+              user: userAddress,
+              match: adminAddress === userAddress,
+            });
+            
+            if (adminAddress !== userAddress) continue;
 
-          const meta = info.content
-            ? contractService.parseBrandMetadata(info.content)
-            : { name: 'Unknown', symbol: '???', description: '', image: '' };
+            const meta = {
+              name: info.name || 'Unknown',
+              symbol: info.symbol || '???',
+              description: '',
+              image: '',
+            };
 
-          results.push({ address: brandAddr, name: meta.name, symbol: meta.symbol });
+            results.push({ address: brandAddr, name: meta.name, symbol: meta.symbol });
+          } catch (err) {
+            console.error('Error loading brand', brandAddr.toString(), err);
+          }
         }
 
+        console.log('MintScreen: User owns', results.length, 'brands');
         setBrands(results);
       } catch (error) {
         console.error('MintScreen load error:', error);
@@ -52,7 +74,7 @@ export function MintScreen() {
     };
 
     load();
-  }, [connected, address, contractService]);
+  }, [connected, address]);
 
   const handleMint = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -70,17 +92,29 @@ export function MintScreen() {
 
     setLoading(true);
     try {
+      const bounceableRecipient = ContractService.toBounceable(recipient);
+      
+      console.log('Mint params:', {
+        brand: selectedBrand,
+        recipient: bounceableRecipient,
+        amount: amount,
+        userAddress: address?.toString(),
+      });
+      
       const msg = contractService.buildMintPayload({
         brandAddress: Address.parse(selectedBrand),
-        to: Address.parse(recipient),
+        to: Address.parse(bounceableRecipient),
         amount: toNano(amount),
       });
 
-      await tonConnectUI.sendTransaction({
-        validUntil: Math.floor(Date.now() / 1000) + 600,
+      console.log('Sending mint transaction:', msg);
+
+      const result = await tonConnectUI.sendTransaction({
+        validUntil: Math.floor(Date.now() / 1000) + 300,
         messages: [msg],
       });
 
+      console.log('Mint transaction result:', result);
       toast.success('Токены начислены! Транзакция в блокчейне.');
       setRecipient('');
       setAmount('');
@@ -141,14 +175,25 @@ export function MintScreen() {
 
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1.5">Адрес получателя</label>
-              <input
-                type="text"
-                value={recipient}
-                onChange={(e) => setRecipient(e.target.value)}
-                className="w-full px-3 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400 transition-all"
-                placeholder="EQD..."
-                required
-              />
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={recipient}
+                  onChange={(e) => setRecipient(e.target.value)}
+                  className="flex-1 px-3 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400 transition-all"
+                  placeholder="EQD... или 0QD..."
+                  required
+                />
+                {address && (
+                  <button
+                    type="button"
+                    onClick={() => setRecipient(address.toString())}
+                    className="px-3 py-2.5 bg-indigo-100 text-indigo-600 rounded-xl text-xs font-medium hover:bg-indigo-200 transition-colors"
+                  >
+                    Себе
+                  </button>
+                )}
+              </div>
               {recipient && !ContractService.isValidAddress(recipient) && (
                 <p className="text-red-500 text-xs mt-1">Некорректный адрес</p>
               )}
@@ -170,7 +215,7 @@ export function MintScreen() {
           </div>
 
           <div className="bg-indigo-50/80 rounded-xl p-3 text-xs text-indigo-600">
-            <p>Газ: ~0.15 TON</p>
+            <p>Газ: ~0.2 TON</p>
           </div>
 
           <button

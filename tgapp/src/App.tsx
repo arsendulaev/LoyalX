@@ -8,35 +8,14 @@ import { MintScreen } from './screens/MintScreen';
 import { ExchangeRatesScreen } from './screens/ExchangeRatesScreen';
 import { Navigation } from './components/Navigation';
 
-const manifestUrl = new URL('/LoyalX/tonconnect-manifest.json', window.location.origin).toString();
+const manifestUrl = 'https://raijin57.github.io/LoyalX/tonconnect-manifest.json'; 
 
 function App() {
   return (
-    <TonConnectUIProvider
+    <TonConnectUIProvider 
       manifestUrl={manifestUrl}
-      actionsConfiguration={{ twaReturnUrl: 'https://t.me/LoyalXBot' }}
-      enableAndroidBackHandler={false}
-      walletsListConfiguration={{
-        includeWallets: [
-          {
-            appName: 'tonkeeper',
-            name: 'Tonkeeper',
-            imageUrl: 'https://tonkeeper.com/assets/tonconnect-icon.png',
-            aboutUrl: 'https://tonkeeper.com',
-            universalLink: 'https://app.tonkeeper.com/ton-connect',
-            bridgeUrl: 'https://bridge.tonapi.io/bridge',
-            platforms: ['ios', 'android', 'chrome', 'firefox'],
-          },
-          {
-            appName: 'mytonwallet',
-            name: 'MyTonWallet',
-            imageUrl: 'https://static.mytonwallet.io/icon-256.png',
-            aboutUrl: 'https://mytonwallet.io',
-            universalLink: 'https://connect.mytonwallet.org',
-            bridgeUrl: 'https://tonconnectbridge.mytonwallet.org/bridge',
-            platforms: ['ios', 'android', 'chrome', 'firefox', 'safari'],
-          },
-        ],
+      actionsConfiguration={{ 
+        twaReturnUrl: 'https://t.me/LoyalXBot' 
       }}
     >
       <BrowserRouter basename="/LoyalX">
@@ -61,8 +40,6 @@ function App() {
         toastOptions={{
           duration: 4000,
           style: { borderRadius: '12px', background: '#1e1b4b', color: '#fff', fontSize: '14px' },
-          success: { iconTheme: { primary: '#22c55e', secondary: '#fff' } },
-          error: { iconTheme: { primary: '#ef4444', secondary: '#fff' } },
         }}
       />
     </TonConnectUIProvider>

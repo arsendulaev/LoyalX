@@ -1,17 +1,6 @@
 import "@stdlib/deploy";
-import "./brand_jetton";
-
-message CreateBrand {
-    brandName: String;
-    ticker: String;
-    content: Cell; 
-}
-
-message BrandCreated {
-    brandId: Int as uint32;
-    brandAddress: Address;
-    owner: Address;
-}
+import "./messages.tact";
+import "./brand_jetton.tact";
 
 contract Factory with Deployable {
     nextBrandId: Int as uint32;
@@ -24,25 +13,27 @@ contract Factory with Deployable {
     }
 
     receive(msg: CreateBrand) {
+        let ctx: Context = context();
         let currentId: Int = self.nextBrandId;
         self.nextBrandId += 1;
-        let brandInit: StateInit = initOf BrandJetton(sender(), msg.ticker, msg.brandName, msg.content);
+
+        let brandInit: StateInit = initOf BrandJetton(ctx.sender, msg.name, msg.symbol, msg.description, msg.image);
         let brandAddress: Address = contractAddress(brandInit);
 
         self.brands.set(currentId, brandAddress);
         send(SendParameters{
             to: brandAddress,
-            value: ton("0.15"),
+            value: ton("0.25"),
             bounce: false,
             body: Deploy{ queryId: 0 }.toCell(),
             code: brandInit.code,
             data: brandInit.data
         });
-        
+
         emit(BrandCreated{
             brandId: currentId,
             brandAddress: brandAddress,
-            owner: sender()
+            owner: ctx.sender
         }.toCell());
     }
 
