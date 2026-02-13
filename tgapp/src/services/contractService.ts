@@ -10,6 +10,9 @@ import type { Transfer } from '../contracts/JettonWallet';
 export class ContractService {
   private client: TonClient;
   private factoryAddress: Address;
+  private brandsCache: { brands: Address[]; timestamp: number } | null = null;
+  private brandInfoCache: Map<string, { info: any; timestamp: number }> = new Map();
+  private readonly CACHE_TTL = 30000; // 30 секунд
 
   constructor(client: TonClient, factoryAddress: string) {
     this.client = client;
@@ -31,6 +34,11 @@ export class ContractService {
   }
 
   async getAllBrands(): Promise<Address[]> {
+    // проверяем кэш
+    if (this.brandsCache && Date.now() - this.brandsCache.timestamp < this.CACHE_TTL) {
+      return this.brandsCache.brands;
+    }
+
     const factory = await this.getFactory();
     const brands: Address[] = [];
 
@@ -40,6 +48,9 @@ export class ContractService {
         const addr = await factory.getBrandAddress(i);
         if (addr) brands.push(addr);
       }
+      
+      // сохраняем в кэш
+      this.brandsCache = { brands, timestamp: Date.now() };
     } catch (error) {
       console.error('getAllBrands error:', error);
     }
@@ -48,17 +59,29 @@ export class ContractService {
   }
 
   async getBrandInfo(brandAddress: Address) {
+    const key = brandAddress.toString();
+    
+    // проверяем кэш
+    const cached = this.brandInfoCache.get(key);
+    if (cached && Date.now() - cached.timestamp < this.CACHE_TTL) {
+      return cached.info;
+    }
+
     const brand = this.client.open(BrandJetton.fromAddress(brandAddress));
 
     try {
       const data = await brand.getGetJettonData();
-      return {
+      const info = {
         totalSupply: data.totalSupply,
         mintable: data.mintable,
         admin: data.admin,
         content: data.content,
         walletCode: data.walletCode,
       };
+      
+      // сохраняем в кэш
+      this.brandInfoCache.set(key, { info, timestamp: Date.now() });
+      return info;
     } catch (error) {
       console.error('getBrandInfo error:', error);
       return null;

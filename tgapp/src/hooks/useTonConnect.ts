@@ -1,13 +1,18 @@
 import { useTonConnectUI, useTonAddress } from '@tonconnect/ui-react';
 import { Address } from '@ton/core';
+import { useMemo } from 'react';
 
 export function useTonConnect() {
   const [tonConnectUI] = useTonConnectUI();
-  const address = useTonAddress();
+  const addressString = useTonAddress();
+
+  const address = useMemo(() => {
+    return addressString ? Address.parse(addressString) : null;
+  }, [addressString]);
 
   return {
-    address: address ? Address.parse(address) : null,
-    connected: !!address,
+    address,
+    connected: !!addressString,
     tonConnectUI,
     disconnect: () => tonConnectUI.disconnect(),
   };
