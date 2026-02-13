@@ -16,8 +16,13 @@ export function CreateBrandScreen() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!connected || !contractService) {
+    if (!connected) {
       toast.error('Подключите кошелёк');
+      return;
+    }
+    
+    if (!contractService) {
+      toast.error('Инициализация... Попробуйте ещё раз');
       return;
     }
 
