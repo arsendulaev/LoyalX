@@ -1,25 +1,59 @@
 import { useState } from 'react';
 import { useTonConnect } from '../hooks/useTonConnect';
+import { useContract } from '../hooks/useContract';
+import { useTonConnectUI } from '@tonconnect/ui-react';
+import { beginCell } from '@ton/core';
 
 export function CreateBrandScreen() {
   const { connected } = useTonConnect();
+  const contractService = useContract();
+  const [tonConnectUI] = useTonConnectUI();
   const [brandName, setBrandName] = useState('');
   const [ticker, setTicker] = useState('');
   const [description, setDescription] = useState('');
+  const [imageUrl, setImageUrl] = useState('');
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!connected) return;
+    if (!connected || !contractService) return;
 
     setLoading(true);
     try {
-      // TODO: Интеграция с контрактом Factory
-      console.log('Creating brand:', { brandName, ticker, description });
-      alert('Функция создания бренда будет реализована после интеграции с контрактами');
+      const { factory, message, value } = await contractService.createBrandMessage({
+        name: brandName,
+        description: description,
+        symbol: ticker,
+        image: imageUrl || 'https://via.placeholder.com/150',
+      });
+
+      await tonConnectUI.sendTransaction({
+        validUntil: Math.floor(Date.now() / 1000) + 600,
+        messages: [
+          {
+            address: factory.address.toString(),
+            amount: value.toString(),
+            payload: beginCell()
+              .storeUint(842869183, 32)
+              .storeStringRefTail(message.brandName)
+              .storeStringRefTail(message.ticker)
+              .storeRef(message.content)
+              .endCell()
+              .toBoc()
+              .toString('base64'),
+          },
+        ],
+      });
+
+      alert('Бренд успешно создан! Транзакция отправлена в блокчейн.');
+      
+      setBrandName('');
+      setTicker('');
+      setDescription('');
+      setImageUrl('');
     } catch (error) {
       console.error('Error creating brand:', error);
-      alert('Ошибка при создании бренда');
+      alert('Ошибка при создании бренда: ' + (error as Error).message);
     } finally {
       setLoading(false);
     }
@@ -28,11 +62,11 @@ export function CreateBrandScreen() {
   if (!connected) {
     return (
       <div className="max-w-2xl mx-auto">
-        <div className="bg-white rounded-lg shadow-md p-8 text-center">
-          <h2 className="text-2xl font-bold text-gray-800 mb-4">
+        <div className="bg-white rounded-lg shadow-md p-6 sm:p-8 text-center">
+          <h2 className="text-xl sm:text-2xl font-bold text-gray-800 mb-4">
             Создание бренда
           </h2>
-          <p className="text-gray-600 mb-6">
+          <p className="text-sm sm:text-base text-gray-600 mb-6">
             Подключите кошелёк для создания своего бренда
           </p>
         </div>
@@ -42,12 +76,12 @@ export function CreateBrandScreen() {
 
   return (
     <div className="max-w-2xl mx-auto">
-      <div className="bg-white rounded-lg shadow-md p-8">
-        <h2 className="text-2xl font-bold text-gray-800 mb-6">
+      <div className="bg-white rounded-lg shadow-md p-4 sm:p-8">
+        <h2 className="text-xl sm:text-2xl font-bold text-gray-800 mb-4 sm:mb-6">
           Создать новый бренд
         </h2>
         
-        <form onSubmit={handleSubmit} className="space-y-6">
+        <form onSubmit={handleSubmit} className="space-y-4 sm:space-y-6">
           <div>
             <label htmlFor="brandName" className="block text-sm font-medium text-gray-700 mb-2">
               Название бренда
@@ -57,7 +91,7 @@ export function CreateBrandScreen() {
               id="brandName"
               value={brandName}
               onChange={(e) => setBrandName(e.target.value)}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+              className="w-full px-3 sm:px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm sm:text-base"
               placeholder="Coffee Shop"
               required
             />
@@ -72,7 +106,7 @@ export function CreateBrandScreen() {
               id="ticker"
               value={ticker}
               onChange={(e) => setTicker(e.target.value.toUpperCase())}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+              className="w-full px-3 sm:px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm sm:text-base"
               placeholder="COF"
               maxLength={4}
               required
@@ -87,15 +121,29 @@ export function CreateBrandScreen() {
               id="description"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+              className="w-full px-3 sm:px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm sm:text-base"
               placeholder="Описание вашего бренда и программы лояльности"
               rows={4}
             />
           </div>
 
-          <div className="bg-indigo-50 rounded-lg p-4">
-            <h3 className="font-semibold text-indigo-900 mb-2">Важно знать:</h3>
-            <ul className="text-sm text-indigo-700 space-y-1">
+          <div>
+            <label htmlFor="imageUrl" className="block text-sm font-medium text-gray-700 mb-2">
+              URL изображения (опционально)
+            </label>
+            <input
+              type="url"
+              id="imageUrl"
+              value={imageUrl}
+              onChange={(e) => setImageUrl(e.target.value)}
+              className="w-full px-3 sm:px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm sm:text-base"
+              placeholder="https://example.com/logo.png"
+            />
+          </div>
+
+          <div className="bg-indigo-50 rounded-lg p-3 sm:p-4">
+            <h3 className="font-semibold text-indigo-900 mb-2 text-sm sm:text-base">Информация:</h3>
+            <ul className="text-xs sm:text-sm text-indigo-700 space-y-1">
               <li>• Создание бренда требует оплаты газа (~0.5 TON)</li>
               <li>• После создания вы станете владельцем контракта</li>
               <li>• Вы сможете минтить токены для пользователей</li>
@@ -105,7 +153,7 @@ export function CreateBrandScreen() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-indigo-600 text-white py-3 px-6 rounded-lg font-semibold hover:bg-indigo-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
+            className="w-full bg-indigo-600 text-white py-2 sm:py-3 px-4 sm:px-6 rounded-lg font-semibold hover:bg-indigo-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed text-sm sm:text-base"
           >
             {loading ? 'Создание...' : 'Создать бренд'}
           </button>

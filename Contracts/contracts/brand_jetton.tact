@@ -38,7 +38,7 @@ contract BrandJetton with Deployable, Ownable {
         self.mintable = true;
     }
 
-    // 1. МИНТИНГ (Эмиссия баллов)
+    // 1. МИНТИНГ
     // Владелец может просто начислить баллы себе
     receive("Mint") {
         let ctx: Context = context();
