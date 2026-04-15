@@ -8,7 +8,7 @@ import { MintScreen } from './screens/MintScreen';
 import { ExchangeRatesScreen } from './screens/ExchangeRatesScreen';
 import { Navigation } from './components/Navigation';
 
-const manifestUrl = 'https://raijin57.github.io/LoyalX/tonconnect-manifest.json'; 
+const manifestUrl = 'https://arsendulaev.github.io/LoyalX/tonconnect-manifest.json'; 
 
 function App() {
   return (
