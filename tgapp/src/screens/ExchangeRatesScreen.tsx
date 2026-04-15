@@ -75,41 +75,14 @@ export function ExchangeRatesScreen() {
 
     setLoading(true);
     try {
-      // для SetExchangeRate нужен адрес JettonWallet входящего токена при данном BrandJetton
-      // то есть адрес кошелька targetBrand у myBrand контракта
       const targetBrandAddress = Address.parse(targetBrand);
       const myBrandAddress = Address.parse(myBrand);
 
-      // адрес кошелька, с которого будут приходить токены при обмене
-      // это JettonWallet контракта myBrand, принадлежащий targetBrand
-      // нет! exchangeRates хранит: [адрес кошелька входящего токена] -> курс
-      // при swap: пользователь отправляет Transfer из своего walletA -> BrandB
-      // BrandB получает TransferNotification от walletA контракта, ctx.sender = адрес walletA
-      // exchangeRates[ctx.sender] должен быть установлен
-      // ctx.sender при Transfer = JettonWallet of BrandA for user
-      // но мы не знаем адрес кошелька конкретного пользователя
-      // в реальности, JettonWallet контрактов определяется по initOf JettonWallet(owner, master)
-      // тут owner = пользователь, master = BrandA
-      // => ctx.sender = contractAddress(initOf JettonWallet(user, BrandA))
-      // но мы не можем установить курс для каждого пользователя
-
-      // Проверим контракт: exchangeRates.get(ctx.sender)
-      // ctx.sender при TransferNotification в BrandB = адрес JettonWallet отправителя
-      // Для универсального курса нам нужен "мастер-адрес" а не пользовательский wallet
-
-      // Хм, это архитектурная проблема. SetExchangeRate принимает jettonWalletAddress,
-      // но при обмене ctx.sender будет user's JettonWallet (уникальный для каждого пользователя).
-      // Значит текущая архитектура обмена не рабочая для произвольных пользователей.
-
-      // Пока установим курс для конкретного walletAddress (для тестирования можно указать адрес
-      // кошелька конкретного пользователя). В будущем нужен рефакторинг контракта.
-
-      // Для тестирования: установим курс для JettonWallet текущего пользователя
-      const jettonWalletAddr = await contractService.getUserWalletAddress(targetBrandAddress, address);
-
+      // Контракт хранит курсы по мастер-адресу токена (не по кошельку пользователя)
+      // поэтому используем адрес targetBrand напрямую
       const msg = contractService.buildSetExchangeRatePayload({
         brandAddress: myBrandAddress,
-        jettonWalletAddress: jettonWalletAddr,
+        jettonMasterAddress: targetBrandAddress,
         rate: BigInt(Math.round(Number(rate) * 100)), // курс с точностью до 0.01
       });
 
@@ -216,7 +189,7 @@ export function ExchangeRatesScreen() {
                 {rate} {myBrands.find(b => b.address.toString() === myBrand)?.symbol || '???'}
               </p>
               <p className="text-blue-500">
-                Курс устанавливается для текущего подключённого кошелька
+                Курс привязан к мастер-адресу токена и работает для всех пользователей
               </p>
             </div>
           )}

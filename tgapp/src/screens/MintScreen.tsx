@@ -54,9 +54,12 @@ export function MintScreen() {
             
             if (adminAddress !== userAddress) continue;
 
-            const meta = info.content
-              ? contractService.parseBrandMetadata(info.content)
-              : { name: 'Unknown', symbol: '???', description: '', image: '' };
+            const meta = {
+              name: info.name || 'Unknown',
+              symbol: info.symbol || '???',
+              description: '',
+              image: '',
+            };
 
             results.push({ address: brandAddr, name: meta.name, symbol: meta.symbol });
           } catch (err) {
@@ -216,7 +219,7 @@ export function MintScreen() {
           </div>
 
           <div className="bg-indigo-50/80 rounded-xl p-3 text-xs text-indigo-600">
-            <p>Газ: ~0.15 TON</p>
+            <p>Газ: ~0.2 TON</p>
           </div>
 
           <button

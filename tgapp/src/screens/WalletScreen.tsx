@@ -26,18 +26,25 @@ export function WalletScreen() {
     setLoading(true);
     try {
       console.log('Loading balances for:', address.toString());
-      const data = await contractService.getUserBalances(address, true); // показываем ВСЕ бренды (включая нулевые)
+      const data = await contractService.getUserBalances(address, true);
       console.log('Loaded balances:', data.length, 'brands');
+      
+      // Дедупликация по адресу бренда
+      const uniqueBalances = new Map<string, TokenBalance>();
       data.forEach(d => {
-        console.log(`Brand ${d.meta.name} (${d.meta.symbol}):`, Number(d.balance) / 1e9, 'tokens');
+        const key = d.brand.toString();
+        if (!uniqueBalances.has(key)) {
+          uniqueBalances.set(key, {
+            brand: d.brand,
+            balance: d.balance,
+            name: d.meta.name,
+            symbol: d.meta.symbol,
+          });
+          console.log(`Brand ${d.meta.name} (${d.meta.symbol}):`, Number(d.balance) / 1e9, 'tokens');
+        }
       });
       
-      setBalances(data.map(d => ({
-        brand: d.brand,
-        balance: d.balance,
-        name: d.meta.name,
-        symbol: d.meta.symbol,
-      })));
+      setBalances(Array.from(uniqueBalances.values()));
     } catch (error) {
       console.error('WalletScreen load error:', error);
     } finally {
@@ -49,11 +56,7 @@ export function WalletScreen() {
     if (!connected || !address || !contractService) return;
     
     loadBalances();
-    
-    // автообновление каждые 10 секунд
-    const interval = setInterval(loadBalances, 10000);
-    return () => clearInterval(interval);
-  }, [connected, address]);
+  }, [connected, address, contractService]);
 
   if (!connected) {
     return (

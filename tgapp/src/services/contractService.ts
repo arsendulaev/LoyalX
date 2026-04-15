@@ -69,7 +69,7 @@ export class ContractService {
         for (let i = 0n; i < brandCount; i++) {
           try {
             // Добавляем задержку между запросами чтобы не ловить 429
-            await this.delay(500); 
+            await this.delay(1500); 
             const addr = await factory.getBrandAddress(i);
             if (addr) brands.push(addr);
           } catch (e) {
@@ -90,7 +90,7 @@ export class ContractService {
     return this.getAllBrandsPromise;
   }
 
-  async getBrandInfo(brandAddress: Address) {
+  async getBrandInfo(brandAddress: Address, retries = 3) {
     const key = brandAddress.toString();
     
     // Проверяем кеш
@@ -100,27 +100,38 @@ export class ContractService {
     }
 
     // Задержка перед запросом инфо
-    await this.delay(300);
+    await this.delay(1000);
 
     const brand = this.client.open(BrandJetton.fromAddress(brandAddress));
 
-    try {
-      const data = await brand.getGetJettonData();
-      const info = {
-        totalSupply: data.totalSupply,
-        mintable: data.mintable,
-        admin: data.admin,
-        content: data.content,
-        walletCode: data.walletCode,
-      };
-      
-      // сохраняем в кэш
-      this.brandInfoCache.set(key, { info, timestamp: Date.now() });
-      return info;
-    } catch (error) {
-      // не логируем ошибку для UI чтобы не спамить
-      return null;
+    for (let attempt = 0; attempt < retries; attempt++) {
+      try {
+        const data = await brand.getGetJettonData();
+        const info = {
+          totalSupply: data.totalSupply,
+          mintable: data.mintable,
+          admin: data.admin,
+          name: data.name,
+          symbol: data.symbol,
+          walletCode: data.walletCode,
+        };
+
+        // сохраняем в кэш
+        this.brandInfoCache.set(key, { info, timestamp: Date.now() });
+        return info;
+      } catch (error: any) {
+        const is429 = error?.response?.status === 429 || error?.message?.includes('429');
+        if (is429 && attempt < retries - 1) {
+          const backoff = (attempt + 1) * 2000; // 2s, 4s, 6s
+          console.warn(`getBrandInfo 429 for ${brandAddress.toString()}, retry ${attempt + 1}/${retries} after ${backoff}ms`);
+          await this.delay(backoff);
+          continue;
+        }
+        console.error('getBrandInfo error for', brandAddress.toString(), error);
+        return null;
+      }
     }
+    return null;
   }
 
   // парсим TEP-64 off-chain metadata
@@ -129,16 +140,24 @@ export class ContractService {
     try {
       const slice = content.beginParse();
       const tag = slice.loadUint(8);
+      console.log('parseBrandMetadata: tag =', tag);
       if (tag === 0x01) {
-        const json = JSON.parse(slice.loadStringTail());
+        const jsonString = slice.loadStringTail();
+        console.log('parseBrandMetadata: JSON string =', jsonString);
+        const json = JSON.parse(jsonString);
+        console.log('parseBrandMetadata: parsed =', json);
         return {
           name: json.name || defaults.name,
           symbol: json.symbol || defaults.symbol,
           description: json.description || defaults.description,
           image: json.image || defaults.image,
         };
+      } else {
+        console.warn('parseBrandMetadata: unexpected tag', tag, 'expected 0x01');
       }
-    } catch {}
+    } catch (error) {
+      console.error('parseBrandMetadata error:', error);
+    }
     return defaults;
   }
 
@@ -160,25 +179,32 @@ export class ContractService {
 
   async getUserBalances(userAddress: Address, includeZero = true) {
     const brands = await this.getAllBrands();
+    console.log('getUserBalances: found', brands.length, 'brands');
     const results: { brand: Address; balance: bigint; meta: { name: string; symbol: string; description: string; image: string } }[] = [];
 
     for (const brandAddr of brands) {
       try {
-        const [balance, info] = await Promise.all([
-          this.getUserBalance(brandAddr, userAddress),
-          this.getBrandInfo(brandAddr),
-        ]);
+        console.log('getUserBalances: processing brand', brandAddr.toString());
+        
+        // Последовательные запросы вместо параллельных, чтобы не словить 429
+        const info = await this.getBrandInfo(brandAddr);
+        await this.delay(800); // Задержка между запросами
+        const balance = await this.getUserBalance(brandAddr, userAddress);
+        
+        console.log('getUserBalances: brand', brandAddr.toString(), 'balance:', balance, 'info:', info);
         
         // пропускаем нулевые балансы если не нужны
         if (!includeZero && balance === 0n) continue;
         
-        const meta = info?.content ? this.parseBrandMetadata(info.content) : { name: 'Unknown', symbol: '???', description: '', image: '' };
+        const meta = info ? { name: info.name || 'Unknown', symbol: info.symbol || '???', description: '', image: '' } : { name: 'Unknown', symbol: '???', description: '', image: '' };
+        console.log('getUserBalances: parsed meta for', brandAddr.toString(), ':', meta);
         results.push({ brand: brandAddr, balance, meta });
       } catch (err) {
         console.error('getUserBalances error for brand', brandAddr.toString(), err);
       }
     }
 
+    console.log('getUserBalances: returning', results.length, 'results');
     return results;
   }
 
@@ -188,26 +214,17 @@ export class ContractService {
     amount: string;
     payload: string;
   } {
-    const content = beginCell()
-      .storeUint(0x01, 8)
-      .storeStringTail(JSON.stringify({
-        name: params.name,
-        description: params.description,
-        symbol: params.symbol,
-        image: params.image,
-      }))
-      .endCell();
-
     const message: CreateBrand = {
       $$type: 'CreateBrand',
-      brandName: params.name,
-      ticker: params.symbol,
-      content,
+      name: params.name,
+      symbol: params.symbol,
+      description: params.description,
+      image: params.image,
     };
 
     return {
       address: this.factoryAddress.toString(),
-      amount: toNano('0.5').toString(),
+      amount: toNano('0.4').toString(),
       payload: beginCell().store(storeCreateBrand(message)).endCell().toBoc().toString('base64'),
     };
   }
@@ -226,7 +243,7 @@ export class ContractService {
 
     return {
       address: params.brandAddress.toString(),
-      amount: toNano('0.5').toString(), // нужно минимум 0.5 TON для минта + деплой JettonWallet
+      amount: toNano('0.2').toString(), // Уменьшено с 0.5 до 0.2
       payload: beginCell().store(storeMintTo(message)).endCell().toBoc().toString('base64'),
     };
   }
@@ -234,7 +251,7 @@ export class ContractService {
   // --- Установка курса обмена ---
   buildSetExchangeRatePayload(params: {
     brandAddress: Address;
-    jettonWalletAddress: Address;
+    jettonMasterAddress: Address;
     rate: bigint;
   }): {
     address: string;
@@ -243,7 +260,7 @@ export class ContractService {
   } {
     const message: SetExchangeRate = {
       $$type: 'SetExchangeRate',
-      jettonWalletAddress: params.jettonWalletAddress,
+      jettonMasterAddress: params.jettonMasterAddress,
       rate: params.rate,
     };
 
@@ -275,7 +292,7 @@ export class ContractService {
       responseDestination: params.userAddress,
       customPayload: null,
       forwardTonAmount: toNano('0.05'),
-      forwardPayload: beginCell().endCell().asSlice(),
+      forwardPayload: beginCell().storeAddress(params.fromBrandAddress).endCell().asSlice(),
     };
 
     return {

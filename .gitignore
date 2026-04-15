@@ -1,23 +1,18 @@
-build/                 # Результаты компиляции контрактов
-temp/                  # Временные файлы Blueprint
-.env                   # Приватные ключи и API-URL (обязательно!)
+build/
+temp/
+.env
 .env.local
-node_modules/          # Стандартно, но проверь, что есть
-Documentation/         # Документация
+node_modules/
+Documentation/
 
-# Contract build artifacts
 Contracts/build/
 Contracts/wrappers/
 
-# Frontend build
 tgapp/dist/
 tgapp/node_modules/
 
-# IDE
 .vscode/
 .idea/
-.DS_Store
 
-# Logs
 *.log
 npm-debug.log*
