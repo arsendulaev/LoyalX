@@ -1,12 +1,10 @@
-import type { Config } from 'jest';
+import type { Config } from "jest";
 
 const config: Config = {
-    preset: 'ts-jest',
-    globalSetup: './jest.setup.ts',
-    cache: false,
-    testEnvironment: '@ton/sandbox/jest-environment',
-    testPathIgnorePatterns: ['/node_modules/', '/dist/'],
-    reporters: ['default', ['@ton/sandbox/jest-reporter', {}]],
+  preset: "ts-jest",
+  testEnvironment: "node",
+  testMatch: ["**/tests/**/*.spec.ts"],
+  globalSetup: "./jest.setup.ts",
 };
 
 export default config;

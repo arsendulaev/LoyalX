@@ -1,80 +1,27 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useTonConnect } from '../hooks/useTonConnect';
 import { useContract } from '../hooks/useContract';
+import { useBrands } from '../hooks/useBrands';
 import { useTonConnectUI } from '@tonconnect/ui-react';
 import { Address, toNano } from '@ton/core';
 import { ContractService } from '../services/contractService';
+import { CheckoutQR } from '../components/CheckoutQR';
+import { Scanner } from '@yudiel/react-qr-scanner';
 import toast from 'react-hot-toast';
-
-interface Brand {
-  address: Address;
-  name: string;
-  symbol: string;
-}
 
 export function MintScreen() {
   const { address, connected } = useTonConnect();
   const contractService = useContract();
+  const { brands } = useBrands();
   const [tonConnectUI] = useTonConnectUI();
-  const [brands, setBrands] = useState<Brand[]>([]);
   const [selectedBrand, setSelectedBrand] = useState('');
   const [recipient, setRecipient] = useState('');
   const [amount, setAmount] = useState('');
   const [loading, setLoading] = useState(false);
-  const [loadingBrands, setLoadingBrands] = useState(false);
+  const [checkoutOpen, setCheckoutOpen] = useState(false);
+  const [scanOpen, setScanOpen] = useState(false);
 
-  useEffect(() => {
-    if (!connected || !address || !contractService) return;
-
-    const load = async () => {
-      setLoadingBrands(true);
-      try {
-        const brandAddresses = await contractService.getAllBrands();
-        console.log('MintScreen: Total brands found:', brandAddresses.length);
-        console.log('MintScreen: User address:', address.toString({ bounceable: true }));
-        
-        const results: Brand[] = [];
-
-        for (const brandAddr of brandAddresses) {
-          try {
-            const info = await contractService.getBrandInfo(brandAddr);
-            if (!info) continue;
-            const adminAddress = info.admin.toString({ bounceable: true });
-            const userAddress = address.toString({ bounceable: true });
-            
-            console.log('Brand check:', {
-              brand: brandAddr.toString().slice(0, 10) + '...',
-              admin: adminAddress,
-              user: userAddress,
-              match: adminAddress === userAddress,
-            });
-            
-            if (adminAddress !== userAddress) continue;
-
-            const meta = {
-              name: info.name || 'Unknown',
-              symbol: info.symbol || '???',
-              description: '',
-              image: '',
-            };
-
-            results.push({ address: brandAddr, name: meta.name, symbol: meta.symbol });
-          } catch (err) {
-            console.error('Error loading brand', brandAddr.toString(), err);
-          }
-        }
-
-        console.log('MintScreen: User owns', results.length, 'brands');
-        setBrands(results);
-      } catch (error) {
-        console.error('MintScreen load error:', error);
-      } finally {
-        setLoadingBrands(false);
-      }
-    };
-
-    load();
-  }, [connected, address]);
+  const ownedBrands = brands.filter(b => b.isOwner);
 
   const handleMint = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -84,7 +31,6 @@ export function MintScreen() {
       toast.error('Некорректный адрес получателя');
       return;
     }
-
     if (!amount || Number(amount) <= 0) {
       toast.error('Укажите количество токенов');
       return;
@@ -92,34 +38,21 @@ export function MintScreen() {
 
     setLoading(true);
     try {
-      const bounceableRecipient = ContractService.toBounceable(recipient);
-      
-      console.log('Mint params:', {
-        brand: selectedBrand,
-        recipient: bounceableRecipient,
-        amount: amount,
-        userAddress: address?.toString(),
-      });
-      
       const msg = contractService.buildMintPayload({
         brandAddress: Address.parse(selectedBrand),
-        to: Address.parse(bounceableRecipient),
+        to: Address.parse(ContractService.toBounceable(recipient)),
         amount: toNano(amount),
       });
 
-      console.log('Sending mint transaction:', msg);
-
-      const result = await tonConnectUI.sendTransaction({
+      await tonConnectUI.sendTransaction({
         validUntil: Math.floor(Date.now() / 1000) + 300,
         messages: [msg],
       });
 
-      console.log('Mint transaction result:', result);
-      toast.success('Токены начислены! Транзакция в блокчейне.');
+      toast.success('Токены начислены!');
       setRecipient('');
       setAmount('');
     } catch (error) {
-      console.error('Mint error:', error);
       const msg = (error as Error).message;
       if (msg.includes('Interrupted') || msg.includes('cancel')) {
         toast('Отменено', { icon: '✕' });
@@ -141,14 +74,62 @@ export function MintScreen() {
 
   return (
     <div className="space-y-4">
+      {checkoutOpen && (
+        <CheckoutQR
+          brands={ownedBrands.map(b => ({ address: b.address, name: b.name, symbol: b.symbol }))}
+          onClose={() => setCheckoutOpen(false)}
+        />
+      )}
+
+      {scanOpen && (
+        <div className="fixed inset-0 z-50 flex flex-col bg-black">
+          <div className="flex items-center justify-between px-4 pt-4 pb-2">
+            <h2 className="text-white text-lg font-semibold">Сканировать адрес клиента</h2>
+            <button onClick={() => setScanOpen(false)} className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center text-white">✕</button>
+          </div>
+          <div className="flex-1 relative">
+            <Scanner
+              onScan={(results) => {
+                if (!results.length) return;
+                const raw = results[0].rawValue;
+                let addr = raw;
+                if (raw.startsWith('ton://transfer/')) {
+                  try { addr = new URL(raw.replace('ton://transfer/', 'https://x.x/')).pathname.replace('/', ''); } catch {}
+                }
+                if (ContractService.isValidAddress(addr)) {
+                  setRecipient(addr);
+                  setScanOpen(false);
+                  toast.success('Адрес получателя заполнен');
+                } else {
+                  toast.error('Не удалось распознать адрес');
+                }
+              }}
+              onError={() => toast.error('Нет доступа к камере')}
+              constraints={{ facingMode: 'environment' }}
+              styles={{ container: { width: '100%', height: '100%' } }}
+            />
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <div className="w-56 h-56 border-2 border-white rounded-2xl opacity-70" />
+            </div>
+          </div>
+          <p className="text-gray-400 text-sm text-center py-4">Наведите на QR-код с адресом клиента</p>
+        </div>
+      )}
       <h2 className="text-lg font-bold text-gray-800">Начислить токены</h2>
 
-      {loadingBrands ? (
-        <div className="space-y-3">
-          <div className="skeleton h-14 w-full" />
-          <div className="skeleton h-14 w-full" />
-        </div>
-      ) : brands.length === 0 ? (
+      {ownedBrands.length > 0 && (
+        <button
+          onClick={() => setCheckoutOpen(true)}
+          className="w-full flex items-center justify-center gap-2 py-3 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-semibold text-sm rounded-2xl shadow-md transition-colors"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM17 17h3v3h-3z"/>
+          </svg>
+          Сгенерировать QR для списания
+        </button>
+      )}
+
+      {ownedBrands.length === 0 ? (
         <div className="bg-white/80 backdrop-blur-sm rounded-2xl p-6 shadow-sm border border-gray-100 text-center">
           <p className="text-gray-500 text-sm">У вас нет брендов</p>
           <p className="text-gray-400 text-xs mt-1">Сначала создайте бренд</p>
@@ -165,7 +146,7 @@ export function MintScreen() {
                 required
               >
                 <option value="">Выберите бренд</option>
-                {brands.map((b) => (
+                {ownedBrands.map((b) => (
                   <option key={b.address.toString()} value={b.address.toString()}>
                     {b.name} ({b.symbol})
                   </option>
@@ -181,9 +162,19 @@ export function MintScreen() {
                   value={recipient}
                   onChange={(e) => setRecipient(e.target.value)}
                   className="flex-1 px-3 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400 transition-all"
-                  placeholder="EQD... или 0QD..."
+                  placeholder="EQD… или 0QD…"
                   required
                 />
+                <button
+                  type="button"
+                  onClick={() => setScanOpen(true)}
+                  className="px-3 py-2.5 bg-gray-100 text-gray-600 rounded-xl hover:bg-gray-200 transition-colors"
+                  title="Сканировать QR"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM17 17h3v3h-3z"/>
+                  </svg>
+                </button>
                 {address && (
                   <button
                     type="button"
@@ -223,7 +214,7 @@ export function MintScreen() {
             disabled={loading || !selectedBrand}
             className="w-full py-3 bg-indigo-600 text-white rounded-xl font-semibold text-sm hover:bg-indigo-700 active:bg-indigo-800 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed"
           >
-            {loading ? 'Отправка...' : 'Начислить'}
+            {loading ? 'Отправка…' : 'Начислить'}
           </button>
         </form>
       )}

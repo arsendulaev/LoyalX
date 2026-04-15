@@ -1,222 +1,258 @@
-import { Address, toNano, beginCell, Cell } from '@ton/core';
-import { TonClient } from '@ton/ton';
-import { Factory, storeCreateBrand, CreateBrand } from '../contracts/Factory';
-import { BrandJetton, storeMintTo, storeSetExchangeRate, MintTo, SetExchangeRate } from '../contracts/BrandJetton';
-import { JettonWallet, storeTransfer, Transfer } from '../contracts/JettonWallet';
+import { Address, toNano, beginCell, Cell, Dictionary } from '@ton/core';
+import { storeCreateBrand, CreateBrand } from '../contracts/Factory';
+import { storeMintTo, storeProposeRate, storeAcceptRate, storeRejectProposal, MintTo, ProposeRate, AcceptRate, RejectProposal } from '../contracts/BrandJetton';
+import { storeTokenTransfer, TokenTransfer } from '../contracts/JettonWallet';
+import { getJettonInfo, getBatchJettonInfo, getUserJettons, runGetMethod, JettonMetadata } from './tonApiService';
+
+export interface BrandInfo {
+  address: string;
+  admin: string;
+  name: string;
+  symbol: string;
+  description: string;
+  image: string;
+  totalSupply: string;
+}
+
+export interface BrandBalance {
+  brand: Address;
+  balance: bigint;
+  meta: {
+    name: string;
+    symbol: string;
+    description: string;
+    image: string;
+  };
+}
 
 export class ContractService {
-  private client: TonClient;
-  private factoryAddress: Address;
+  private factoryAddress: string;
 
-  private brandsCache: { brands: Address[]; timestamp: number } | null = null;
-  private brandInfoCache: Map<string, { info: any; timestamp: number }> = new Map();
-  private readonly CACHE_TTL = 120000;
-  private getAllBrandsPromise: Promise<Address[]> | null = null;
+  private brandsCache: Address[] | null = null;
+  private metaCache = new Map<string, JettonMetadata>();
+  private pairsCache = new Map<string, { pairs: { brand: Address; rate: number }[]; ts: number }>();
+  private readonly PAIRS_TTL = 30_000;
 
-  constructor(client: TonClient, factoryAddress: string) {
-    this.client = client;
-    this.factoryAddress = Address.parse(factoryAddress);
-  }
-
-  private async delay(ms: number) {
-    return new Promise(resolve => setTimeout(resolve, ms));
+  constructor(_client: unknown, factoryAddress: string) {
+    this.factoryAddress = factoryAddress;
   }
 
   clearCache() {
     this.brandsCache = null;
-    this.brandInfoCache.clear();
-    this.getAllBrandsPromise = null;
+    this.metaCache.clear();
+    this.pairsCache.clear();
   }
 
-  async getFactory() {
-    return this.client.open(Factory.fromAddress(this.factoryAddress));
+  getCachedMeta(brandAddress: Address): JettonMetadata | undefined {
+    return this.metaCache.get(brandAddress.toRawString());
   }
 
   async checkFactoryActive(): Promise<boolean> {
     try {
-      const state = await this.client.getContractState(this.factoryAddress);
-      return state.state === 'active';
+      const res = await runGetMethod(this.factoryAddress, 'brandCount');
+      return !!res?.stack;
     } catch {
       return false;
     }
   }
 
   async getAllBrands(): Promise<Address[]> {
-    if (this.brandsCache && Date.now() - this.brandsCache.timestamp < this.CACHE_TTL) {
-      return this.brandsCache.brands;
+    if (this.brandsCache !== null) return this.brandsCache;
+
+    const countResult = await runGetMethod(this.factoryAddress, 'brandCount');
+    const numHex: string = countResult.stack?.[0]?.num ?? '0x0';
+    const count = Number(BigInt(numHex));
+    console.log(`getAllBrands: factory has ${count} brands`);
+
+    if (count === 0) {
+      this.brandsCache = [];
+      return [];
     }
 
-    if (this.getAllBrandsPromise) {
-      return this.getAllBrandsPromise;
-    }
-    this.getAllBrandsPromise = (async () => {
-      try {
-        const factory = await this.getFactory();
-        const brands: Address[] = [];
-        const brandCount = await factory.getNumBrands();
-        
-        console.log(`Fetching ${brandCount} brands...`);
+    const brands: Address[] = [];
+    const CHUNK = 5;
 
-        for (let i = 0n; i < brandCount; i++) {
+    for (let i = 0; i < count; i += CHUNK) {
+      const indices = Array.from({ length: Math.min(CHUNK, count - i) }, (_, k) => i + k);
+      const results = await Promise.all(
+        indices.map(async (idx) => {
           try {
-            await this.delay(1500); 
-            const addr = await factory.getBrandAddress(i);
-            if (addr) brands.push(addr);
+            const res = await runGetMethod(this.factoryAddress, 'brandAddress', [idx.toString()]);
+            const stackItem = res.stack?.[0];
+            if (!stackItem) return null;
+            const cellHex: string = stackItem.cell ?? stackItem.slice ?? null;
+            if (!cellHex) return null;
+            const cell = Cell.fromBoc(Buffer.from(cellHex, 'hex'))[0];
+            return cell.beginParse().loadAddress();
           } catch (e) {
-            console.warn(`Failed to fetch brand ${i}`, e);
+            console.warn(`getAllBrands: failed to fetch brand[${idx}]`, e);
+            return null;
           }
-        }
-        
-        this.brandsCache = { brands, timestamp: Date.now() };
-        return brands;
-      } catch (error) {
-        console.error('getAllBrands error:', error);
-        throw error;
-      } finally {
-        this.getAllBrandsPromise = null;
-      }
-    })();
+        })
+      );
+      brands.push(...results.filter((a): a is Address => a !== null));
+    }
 
-    return this.getAllBrandsPromise;
+    this.brandsCache = brands;
+    return brands;
   }
 
-  async getBrandInfo(brandAddress: Address, retries = 3) {
-    const key = brandAddress.toString();
-    const cached = this.brandInfoCache.get(key);
-    if (cached && Date.now() - cached.timestamp < this.CACHE_TTL) {
-      return cached.info;
+  async getBrandInfo(brandAddress: Address): Promise<BrandInfo | null> {
+    const key = brandAddress.toRawString();
+    if (this.metaCache.has(key)) {
+      const m = this.metaCache.get(key)!;
+      return { address: key, admin: m.admin ?? '', name: m.name, symbol: m.symbol, description: m.description, image: m.image, totalSupply: m.totalSupply };
     }
-    await this.delay(1000);
+    const info = await getJettonInfo(brandAddress.toString({ urlSafe: true, bounceable: true }));
+    if (!info) return null;
+    this.metaCache.set(key, info);
+    return { address: key, admin: info.admin ?? '', name: info.name, symbol: info.symbol, description: info.description, image: info.image, totalSupply: info.totalSupply };
+  }
 
-    const brand = this.client.open(BrandJetton.fromAddress(brandAddress));
-
-    for (let attempt = 0; attempt < retries; attempt++) {
+  async getUserBalances(userAddress: Address, attempts = 3): Promise<BrandBalance[]> {
+    let lastError: unknown;
+    for (let i = 0; i < attempts; i++) {
       try {
-        const data = await brand.getGetJettonData();
-        const info = {
-          totalSupply: data.totalSupply,
-          mintable: data.mintable,
-          admin: data.admin,
-          name: data.name,
-          symbol: data.symbol,
-          walletCode: data.walletCode,
-        };
-        this.brandInfoCache.set(key, { info, timestamp: Date.now() });
-        return info;
-      } catch (error: any) {
-        const is429 = error?.response?.status === 429 || error?.message?.includes('429');
-        if (is429 && attempt < retries - 1) {
-          const backoff = (attempt + 1) * 2000;
-          console.warn(`getBrandInfo 429 for ${brandAddress.toString()}, retry ${attempt + 1}/${retries} after ${backoff}ms`);
-          await this.delay(backoff);
-          continue;
-        }
-        console.error('getBrandInfo error for', brandAddress.toString(), error);
-        return null;
+        return await this._fetchUserBalances(userAddress);
+      } catch (e) {
+        lastError = e;
+        if (i < attempts - 1) await new Promise(r => setTimeout(r, 2000));
       }
     }
-    return null;
+    throw lastError;
   }
 
-  parseBrandMetadata(content: Cell): { name: string; symbol: string; description: string; image: string } {
-    const defaults = { name: 'Unknown', symbol: '???', description: '', image: '' };
-    try {
-      const slice = content.beginParse();
-      const tag = slice.loadUint(8);
-      console.log('parseBrandMetadata: tag =', tag);
-      if (tag === 0x01) {
-        const jsonString = slice.loadStringTail();
-        console.log('parseBrandMetadata: JSON string =', jsonString);
-        const json = JSON.parse(jsonString);
-        console.log('parseBrandMetadata: parsed =', json);
-        return {
-          name: json.name || defaults.name,
-          symbol: json.symbol || defaults.symbol,
-          description: json.description || defaults.description,
-          image: json.image || defaults.image,
-        };
-      } else {
-        console.warn('parseBrandMetadata: unexpected tag', tag, 'expected 0x01');
-      }
-    } catch (error) {
-      console.error('parseBrandMetadata error:', error);
+  private async _fetchUserBalances(userAddress: Address): Promise<BrandBalance[]> {
+    const [brands, userJettons] = await Promise.all([
+      this.getAllBrands(),
+      getUserJettons(userAddress.toString({ urlSafe: true, bounceable: true })),
+    ]);
+
+    const balanceMap = new Map<string, bigint>();
+    for (const j of userJettons) {
+      try {
+        const raw = Address.parse(j.masterAddress).toRawString();
+        balanceMap.set(raw, BigInt(j.balance));
+      } catch {}
     }
-    return defaults;
-  }
 
-  async getUserWalletAddress(brandAddress: Address, userAddress: Address): Promise<Address> {
-    const brand = this.client.open(BrandJetton.fromAddress(brandAddress));
-    return await brand.getGetWalletAddress(userAddress);
-  }
+    const brandStrings = brands.map(b => b.toString({ urlSafe: true, bounceable: true }));
+    const infoMap = await getBatchJettonInfo(brandStrings);
 
-  async getUserBalance(brandAddress: Address, userAddress: Address): Promise<bigint> {
-    try {
-      const walletAddress = await this.getUserWalletAddress(brandAddress, userAddress);
-      const wallet = this.client.open(JettonWallet.fromAddress(walletAddress));
-      const data = await wallet.getGetWalletData();
-      return data.balance;
-    } catch {
-      return 0n;
-    }
-  }
-
-  async getUserBalances(userAddress: Address, includeZero = true) {
-    const brands = await this.getAllBrands();
-    console.log('getUserBalances: found', brands.length, 'brands');
-    const results: { brand: Address; balance: bigint; meta: { name: string; symbol: string; description: string; image: string } }[] = [];
-
+    const results: BrandBalance[] = [];
     for (const brandAddr of brands) {
-      try {
-        console.log('getUserBalances: processing brand', brandAddr.toString());
-        const info = await this.getBrandInfo(brandAddr);
-        await this.delay(800);
-        const balance = await this.getUserBalance(brandAddr, userAddress);
-        console.log('getUserBalances: brand', brandAddr.toString(), 'balance:', balance, 'info:', info);
-        if (!includeZero && balance === 0n) continue;
-        
-        const meta = info ? { name: info.name || 'Unknown', symbol: info.symbol || '???', description: '', image: '' } : { name: 'Unknown', symbol: '???', description: '', image: '' };
-        console.log('getUserBalances: parsed meta for', brandAddr.toString(), ':', meta);
-        results.push({ brand: brandAddr, balance, meta });
-      } catch (err) {
-        console.error('getUserBalances error for brand', brandAddr.toString(), err);
+      const raw = brandAddr.toRawString();
+      const bounceable = brandAddr.toString({ urlSafe: true, bounceable: true });
+      let info = infoMap.get(bounceable);
+
+      if (!info) {
+        info = await this._getBrandMetaFromContract(brandAddr);
       }
+
+      const meta = info
+        ? { name: info.name, symbol: info.symbol, description: info.description, image: info.image }
+        : { name: `Brand ${bounceable.slice(0, 6)}…`, symbol: '???', description: '', image: '' };
+
+      if (info) this.metaCache.set(raw, info);
+
+      results.push({
+        brand: brandAddr,
+        balance: balanceMap.get(raw) ?? 0n,
+        meta,
+      });
     }
 
-    console.log('getUserBalances: returning', results.length, 'results');
     return results;
   }
 
+  async getOwnedBrands(userAddress: Address): Promise<{ address: Address; info: BrandInfo }[]> {
+    const brands = await this.getAllBrands();
+    const brandStrings = brands.map(b => b.toString({ urlSafe: true, bounceable: true }));
+    const infoMap = await getBatchJettonInfo(brandStrings);
+
+    const userRaw = userAddress.toRawString();
+    const owned: { address: Address; info: BrandInfo }[] = [];
+
+    for (const brandAddr of brands) {
+      const bounceable = brandAddr.toString({ urlSafe: true, bounceable: true });
+      const info = infoMap.get(bounceable);
+      if (!info) continue;
+
+      let adminRaw = '';
+      try { if (info.admin) adminRaw = Address.parse(info.admin).toRawString(); } catch {}
+      if (adminRaw !== userRaw) continue;
+
+      owned.push({
+        address: brandAddr,
+        info: {
+          address: brandAddr.toRawString(),
+          admin: info.admin ?? '',
+          name: info.name,
+          symbol: info.symbol,
+          description: info.description,
+          image: info.image,
+          totalSupply: info.totalSupply,
+        },
+      });
+    }
+
+    return owned;
+  }
+
+  private async _getBrandMetaFromContract(brandAddress: Address): Promise<JettonMetadata | null> {
+    try {
+      const addrStr = brandAddress.toString({ urlSafe: true, bounceable: true });
+      const res = await runGetMethod(addrStr, 'data');
+      const stack = res?.stack;
+      if (!stack || stack.length < 6) return null;
+      const getString = (item: any): string => {
+        if (!item) return '';
+        if (item.type === 'slice' || item.type === 'cell') {
+          try {
+            const hex: string = item.cell ?? item.slice ?? '';
+            if (!hex) return '';
+            const cell = Cell.fromBoc(Buffer.from(hex, 'hex'))[0];
+            const slice = cell.beginParse();
+            const bytes: number[] = [];
+            while (slice.remainingBits >= 8) bytes.push(slice.loadUint(8));
+            return Buffer.from(bytes).toString('utf8');
+          } catch { return ''; }
+        }
+        return '';
+      };
+      const name = getString(stack[2]);
+      const symbol = getString(stack[3]);
+      const description = getString(stack[4]);
+      const imageUrl = getString(stack[5]);
+      return { address: addrStr, name, symbol, description, image: imageUrl, admin: null, totalSupply: '0' };
+    } catch {
+      return null;
+    }
+  }
+
   buildCreateBrandPayload(params: { name: string; description: string; symbol: string; image: string }): {
-    address: string;
-    amount: string;
-    payload: string;
+    address: string; amount: string; payload: string;
   } {
     const message: CreateBrand = {
       $$type: 'CreateBrand',
       name: params.name,
       symbol: params.symbol,
       description: params.description,
-      image: params.image,
+      imageUrl: params.image,
     };
-
     return {
-      address: this.factoryAddress.toString(),
-      amount: toNano('0.4').toString(),
+      address: this.factoryAddress,
+      amount: toNano('1.1').toString(),
       payload: beginCell().store(storeCreateBrand(message)).endCell().toBoc().toString('base64'),
     };
   }
 
   buildMintPayload(params: { brandAddress: Address; to: Address; amount: bigint }): {
-    address: string;
-    amount: string;
-    payload: string;
+    address: string; amount: string; payload: string;
   } {
     const message: MintTo = {
-      $$type: 'MintTo',
-      to: params.to,
-      amount: params.amount,
+      $$type: 'MintTo', queryId: 0n, to: params.to, amount: params.amount,
     };
-
     return {
       address: params.brandAddress.toString(),
       amount: toNano('0.2').toString(),
@@ -225,70 +261,130 @@ export class ContractService {
   }
 
   buildSetExchangeRatePayload(params: {
-    brandAddress: Address;
-    jettonMasterAddress: Address;
-    rate: bigint;
-  }): {
-    address: string;
-    amount: string;
-    payload: string;
-  } {
-    const message: SetExchangeRate = {
-      $$type: 'SetExchangeRate',
-      jettonMasterAddress: params.jettonMasterAddress,
-      rate: params.rate,
+    brandAddress: Address; jettonMasterAddress: Address; rate: bigint;
+  }): { address: string; amount: string; payload: string } {
+    const message: ProposeRate = {
+      $$type: 'ProposeRate', targetBrand: params.jettonMasterAddress, rate: params.rate,
     };
-
     return {
       address: params.brandAddress.toString(),
       amount: toNano('0.05').toString(),
-      payload: beginCell().store(storeSetExchangeRate(message)).endCell().toBoc().toString('base64'),
+      payload: beginCell().store(storeProposeRate(message)).endCell().toBoc().toString('base64'),
     };
   }
 
-  async buildSwapPayload(params: {
-    fromBrandAddress: Address;
-    toBrandAddress: Address;
-    amount: bigint;
-    userAddress: Address;
-  }): Promise<{
-    address: string;
-    amount: string;
-    payload: string;
-  }> {
-    const walletAddress = await this.getUserWalletAddress(params.fromBrandAddress, params.userAddress);
+  buildAcceptRatePayload(params: {
+    brandAddress: Address; sourceBrand: Address;
+  }): { address: string; amount: string; payload: string } {
+    const message: AcceptRate = {
+      $$type: 'AcceptRate', sourceBrand: params.sourceBrand,
+    };
+    return {
+      address: params.brandAddress.toString(),
+      amount: toNano('0.05').toString(),
+      payload: beginCell().store(storeAcceptRate(message)).endCell().toBoc().toString('base64'),
+    };
+  }
 
-    const message: Transfer = {
-      $$type: 'Transfer',
+  buildRejectProposalPayload(params: {
+    brandAddress: Address; proposerBrand: Address;
+  }): { address: string; amount: string; payload: string } {
+    const message: RejectProposal = {
+      $$type: 'RejectProposal', fromBrand: params.proposerBrand,
+    };
+    return {
+      address: params.brandAddress.toString(),
+      amount: toNano('0.05').toString(),
+      payload: beginCell().store(storeRejectProposal(message)).endCell().toBoc().toString('base64'),
+    };
+  }
+
+  async getActivePairs(fromBrand: Address, otherBrands: Address[]): Promise<{ brand: Address; rate: number }[]> {
+    const fromRaw = fromBrand.toRawString();
+
+    const cached = this.pairsCache.get(fromRaw);
+    if (cached && Date.now() - cached.ts < this.PAIRS_TTL) return cached.pairs;
+
+    const results = await Promise.all(
+      otherBrands.filter(t => t.toRawString() !== fromRaw).map(async (target) => {
+        try {
+          const fromAddr = fromBrand.toString({ urlSafe: true, bounceable: true });
+          const targetAddr = target.toString({ urlSafe: true, bounceable: true });
+          const [activeRes, rateRes] = await Promise.all([
+            runGetMethod(fromAddr, 'swapActive', [targetAddr]),
+            runGetMethod(fromAddr, 'proposedRate', [targetAddr]),
+          ]);
+          const active = !!parseInt(activeRes.stack?.[0]?.num ?? '0x0', 16);
+          const rate = parseInt(rateRes.stack?.[0]?.num ?? '0x0', 16);
+          if (active && rate > 0) return { brand: target, rate };
+        } catch {}
+        return null;
+      })
+    );
+    const pairs = results.filter((r): r is { brand: Address; rate: number } => r !== null);
+    this.pairsCache.set(fromRaw, { pairs, ts: Date.now() });
+    return pairs;
+  }
+
+  async getIncomingProposals(brandAddress: Address): Promise<Map<string, number>> {
+    const result = new Map<string, number>();
+    try {
+      const res = await runGetMethod(
+        brandAddress.toString({ urlSafe: true, bounceable: true }),
+        'getIncomingProposals'
+      );
+      const stackItem = res.stack?.[0];
+      if (!stackItem || stackItem.type === 'null') return result;
+      const cellHex: string = stackItem.cell ?? stackItem.slice;
+      if (!cellHex) return result;
+      const cell = Cell.fromBoc(Buffer.from(cellHex, 'hex'))[0];
+      const dict = Dictionary.loadDirect(
+        Dictionary.Keys.Address(),
+        Dictionary.Values.BigInt(257),
+        cell.beginParse()
+      );
+      for (const [key, val] of dict) {
+        try {
+          result.set(key.toString({ urlSafe: true, bounceable: true }), Number(val));
+        } catch {}
+      }
+    } catch {}
+    return result;
+  }
+
+  async buildSwapPayload(params: {
+    fromBrandAddress: Address; toBrandAddress: Address; amount: bigint; userAddress: Address;
+  }): Promise<{ address: string; amount: string; payload: string }> {
+    const res = await runGetMethod(
+      params.fromBrandAddress.toString({ urlSafe: true, bounceable: true }),
+      'walletAddress',
+      [params.userAddress.toString({ urlSafe: true, bounceable: true })]
+    );
+    const cellHex: string = res.stack?.[0]?.cell ?? res.stack?.[0]?.slice;
+    const walletAddress = Cell.fromBoc(Buffer.from(cellHex, 'hex'))[0].beginParse().loadAddress();
+
+    const message: TokenTransfer = {
+      $$type: 'TokenTransfer',
       queryId: 0n,
       amount: params.amount,
-      destination: params.toBrandAddress,
+      destination: params.fromBrandAddress,
       responseDestination: params.userAddress,
       customPayload: null,
       forwardTonAmount: toNano('0.05'),
-      forwardPayload: beginCell().storeAddress(params.fromBrandAddress).endCell().asSlice(),
+      forwardPayload: beginCell().storeUint(2, 8).storeAddress(params.toBrandAddress).endCell().asSlice(),
     };
-
     return {
       address: walletAddress.toString(),
-      amount: toNano('0.25').toString(),
-      payload: beginCell().store(storeTransfer(message)).endCell().toBoc().toString('base64'),
+      amount: toNano('0.5').toString(),
+      payload: beginCell().store(storeTokenTransfer(message)).endCell().toBoc().toString('base64'),
     };
   }
 
   static isValidAddress(addr: string): boolean {
-    try {
-      Address.parse(addr);
-      return true;
-    } catch {
-      return false;
-    }
+    try { Address.parse(addr); return true; } catch { return false; }
   }
+
   static toBounceable(addr: string): string {
-    try {
-      return Address.parse(addr).toString();
-    } catch {
-      return addr;
-    }
+    try { return Address.parse(addr).toString(); } catch { return addr; }
   }
 }

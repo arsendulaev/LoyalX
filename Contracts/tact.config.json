@@ -1,25 +1,28 @@
 {
-  "$schema": "https://raw.githubusercontent.com/tact-lang/tact/main/src/config/configSchema.json",
   "projects": [
     {
-      "name": "Factory",
-      "path": "contracts/factory.tact",
-      "output": "build/Factory",
+      "name": "factory",
+      "path": "./contracts/factory.tact",
+      "output": "./build/factory",
       "options": {
-        "debug": false,
-        "external": false
-      },
-      "mode": "full"
+        "debug": false
+      }
     },
     {
-      "name": "BrandJetton",
-      "path": "contracts/brand_jetton.tact",
-      "output": "build/BrandJetton",
+      "name": "brand_jetton",
+      "path": "./contracts/brand_jetton.tact",
+      "output": "./build/brand_jetton",
       "options": {
-        "debug": false,
-        "external": false
-      },
-      "mode": "full"
+        "debug": false
+      }
+    },
+    {
+      "name": "jetton_wallet",
+      "path": "./contracts/jetton_wallet.tact",
+      "output": "./build/jetton_wallet",
+      "options": {
+        "debug": false
+      }
     }
   ]
 }

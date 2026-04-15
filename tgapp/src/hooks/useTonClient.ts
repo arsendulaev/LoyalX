@@ -3,7 +3,7 @@ import { useRef } from 'react';
 
 function createTonClient(): TonClient {
   return new TonClient({
-    endpoint: 'https://testnet.tonhubapi.com/jsonRPC',
+    endpoint: 'https://testnet.toncenter.com/api/v2/jsonRPC',
   });
 }
 

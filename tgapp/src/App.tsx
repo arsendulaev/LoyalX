@@ -6,42 +6,48 @@ import { CreateBrandScreen } from './screens/CreateBrandScreen';
 import { SwapScreen } from './screens/SwapScreen';
 import { MintScreen } from './screens/MintScreen';
 import { ExchangeRatesScreen } from './screens/ExchangeRatesScreen';
+import { TransactionHistoryScreen } from './screens/TransactionHistoryScreen';
 import { Navigation } from './components/Navigation';
+import { ContractProvider } from './hooks/useContract';
+import { BrandsProvider } from './hooks/useBrands';
 
-const manifestUrl = 'https://raijin57.github.io/LoyalX/tonconnect-manifest.json'; 
+const manifestUrl = 'https://arsendulaev.github.io/LoyalX/tonconnect-manifest.json';
 
 function App() {
   return (
-    <TonConnectUIProvider 
+    <TonConnectUIProvider
       manifestUrl={manifestUrl}
-      actionsConfiguration={{ 
-        twaReturnUrl: 'https://t.me/LoyalXBot' 
-      }}
+      actionsConfiguration={{ twaReturnUrl: 'https://t.me/LoyalXBot' }}
     >
-      <BrowserRouter basename="/LoyalX">
-        <div className="h-screen flex flex-col bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100">
-          <Navigation />
-          <main className="flex-1 overflow-y-auto pb-16">
-            <div className="px-4 py-4 max-w-2xl mx-auto">
-              <Routes>
-                <Route path="/" element={<Navigate to="/wallet" replace />} />
-                <Route path="/wallet" element={<WalletScreen />} />
-                <Route path="/create-brand" element={<CreateBrandScreen />} />
-                <Route path="/swap" element={<SwapScreen />} />
-                <Route path="/mint" element={<MintScreen />} />
-                <Route path="/exchange-rates" element={<ExchangeRatesScreen />} />
-              </Routes>
-            </div>
-          </main>
-        </div>
-      </BrowserRouter>
-      <Toaster
-        position="top-center"
-        toastOptions={{
-          duration: 4000,
-          style: { borderRadius: '12px', background: '#1e1b4b', color: '#fff', fontSize: '14px' },
-        }}
-      />
+      <ContractProvider>
+        <BrandsProvider>
+        <BrowserRouter basename="/LoyalX">
+          <div className="h-screen flex flex-col bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100">
+            <Navigation />
+            <main className="flex-1 overflow-y-auto pb-16">
+              <div className="px-4 py-4 max-w-2xl mx-auto">
+                <Routes>
+                  <Route path="/" element={<Navigate to="/wallet" replace />} />
+                  <Route path="/wallet" element={<WalletScreen />} />
+                  <Route path="/create-brand" element={<CreateBrandScreen />} />
+                  <Route path="/swap" element={<SwapScreen />} />
+                  <Route path="/mint" element={<MintScreen />} />
+                  <Route path="/exchange-rates" element={<ExchangeRatesScreen />} />
+                  <Route path="/history" element={<TransactionHistoryScreen />} />
+                </Routes>
+              </div>
+            </main>
+          </div>
+        </BrowserRouter>
+        </BrandsProvider>
+        <Toaster
+          position="top-center"
+          toastOptions={{
+            duration: 4000,
+            style: { borderRadius: '12px', background: '#1e1b4b', color: '#fff', fontSize: '14px' },
+          }}
+        />
+      </ContractProvider>
     </TonConnectUIProvider>
   );
 }

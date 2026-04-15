@@ -3,9 +3,10 @@ import { useTonConnect } from '../hooks/useTonConnect';
 import { useContract } from '../hooks/useContract';
 import { useTonConnectUI } from '@tonconnect/ui-react';
 import toast from 'react-hot-toast';
+import { getUserJettons } from '../services/tonApiService';
 
 export function CreateBrandScreen() {
-  const { connected } = useTonConnect();
+  const { connected, address } = useTonConnect();
   const contractService = useContract();
   const [tonConnectUI] = useTonConnectUI();
   const [brandName, setBrandName] = useState('');
@@ -51,11 +52,30 @@ export function CreateBrandScreen() {
         messages: [msg],
       });
 
-      toast.success('Транзакция отправлена! Бренд создаётся...');
+      toast.success('Транзакция отправлена! Ждём подтверждения...');
+      contractService.clearCache();
+      let appeared = false;
+      if (address) {
+        const userAddrStr = address.toString({ urlSafe: true, bounceable: true });
+        for (let i = 0; i < 10; i++) {
+          await new Promise(r => setTimeout(r, 3000));
+          try {
+            const jettons = await getUserJettons(userAddrStr);
+            const tickerUpper = ticker.trim().toUpperCase();
+            if (jettons.some(j => j.symbol?.toUpperCase() === tickerUpper)) {
+              appeared = true;
+              break;
+            }
+          } catch {}
+        }
+      }
+
+      contractService.clearCache();
       setBrandName('');
       setTicker('');
       setDescription('');
       setImageUrl('');
+      toast.success(appeared ? 'Бренд создан!' : 'Бренд создан! Может появиться в кошельке через минуту.');
     } catch (error) {
       console.error('CreateBrand error:', error);
       const msg = (error as Error).message;
@@ -132,7 +152,7 @@ export function CreateBrandScreen() {
         </div>
 
         <div className="bg-indigo-50/80 rounded-xl p-3 text-xs text-indigo-600 space-y-1">
-          <p>Газ: ~0.4 TON</p>
+          <p>Газ: ~1.1 TON</p>
           <p>Вы станете владельцем контракта бренда</p>
         </div>
 

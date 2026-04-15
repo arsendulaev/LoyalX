@@ -5,8 +5,9 @@ const tabs = [
   { path: '/wallet', label: 'Кошелёк', icon: WalletIcon },
   { path: '/create-brand', label: 'Бренд', icon: PlusIcon },
   { path: '/swap', label: 'Обмен', icon: SwapIcon },
-  { path: '/mint', label: 'Минт', icon: CoinsIcon },
+  { path: '/mint', label: 'Начислить', icon: CoinsIcon },
   { path: '/exchange-rates', label: 'Курсы', icon: ChartIcon },
+  { path: '/history', label: 'История', icon: HistoryIcon },
 ];
 
 export function Navigation() {
@@ -90,6 +91,16 @@ function ChartIcon({ active }: { active: boolean }) {
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={active ? '#4f46e5' : '#9ca3af'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M3 3v18h18" />
       <path d="M7 16l4-8 4 4 6-6" />
+    </svg>
+  );
+}
+
+function HistoryIcon({ active }: { active: boolean }) {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={active ? '#4f46e5' : '#9ca3af'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 8v4l3 3" />
+      <path d="M3.05 11a9 9 0 1 0 .5-3" />
+      <path d="M3 4v4h4" />
     </svg>
   );
 }

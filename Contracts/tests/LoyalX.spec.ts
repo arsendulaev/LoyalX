@@ -1,39 +1,38 @@
-import { Blockchain, SandboxContract, TreasuryContract } from '@ton/sandbox';
-import { toNano, Address, beginCell } from '@ton/core';
-import { Factory } from '../wrappers/Factory';
-import { BrandJetton } from '../wrappers/BrandJetton';
-import { JettonWallet } from '../wrappers/JettonWallet';
-import '@ton/test-utils';
+import { Blockchain, SandboxContract, TreasuryContract } from "@ton/sandbox";
+import { toNano, beginCell } from "@ton/core";
+import { Factory } from "../build/factory/factory_Factory";
+import { BrandJetton } from "../build/factory/factory_BrandJetton";
+import { JettonWallet } from "../build/factory/factory_JettonWallet";
+import "@ton/test-utils";
 
-describe('LoyalX System Test', () => {
+describe("LoyalX", () => {
     let blockchain: Blockchain;
     let deployer: SandboxContract<TreasuryContract>;
+    let brandOwner: SandboxContract<TreasuryContract>;
     let user: SandboxContract<TreasuryContract>;
     let factory: SandboxContract<Factory>;
 
+    const CREATE_FEE = toNano("1");
+    const MINTBACK_RATE = 1000n;
+
     beforeEach(async () => {
         blockchain = await Blockchain.create();
-        deployer = await blockchain.treasury('deployer');
-        user = await blockchain.treasury('user');
+        deployer = await blockchain.treasury("deployer");
+        brandOwner = await blockchain.treasury("brandOwner");
+        user = await blockchain.treasury("user");
 
-        factory = blockchain.openContract(await Factory.fromInit());
+        const factoryInit = await Factory.fromInit(deployer.address, CREATE_FEE, MINTBACK_RATE);
+        factory = blockchain.openContract(factoryInit);
 
-        const deployResult = await factory.send(
-            deployer.getSender(),
-            { value: toNano('0.1') },
-            {
-                $$type: 'Deploy',
-                queryId: 0n,
-            }
-        );
-
-        expect(deployResult.transactions).toHaveTransaction({
-            from: deployer.address,
+        await deployer.getSender().send({
             to: factory.address,
-            success: true,
+            value: toNano("10"),
+            init: factoryInit.init,
+            bounce: false,
         });
     });
 
+<<<<<<< HEAD
 <<<<<<< HEAD
     it('should create brands, mint tokens and SWAP them', async () => {
         const emptyContent = beginCell().endCell();
@@ -46,21 +45,101 @@ describe('LoyalX System Test', () => {
         const createResultA = await factory.send(
             deployer.getSender(),
             { value: toNano('0.4') },
+=======
+    // Create brand via factory and top up its TON balance
+    async function deployBrand(owner: SandboxContract<TreasuryContract>, name: string): Promise<SandboxContract<BrandJetton>> {
+        const result = await factory.send(
+            owner.getSender(),
+            { value: toNano("2") },
+            { $$type: "CreateBrand", name, symbol: name.slice(0, 3).toUpperCase(), description: "", imageUrl: "" }
+        );
+        expect(result.transactions).toHaveTransaction({ success: true });
+        const idx = (await factory.getBrandCount()) - 1n;
+        const addr = await factory.getBrandAddress(idx);
+        // Top up brand so it can pay gas for outbound messages
+        await deployer.getSender().send({ to: addr!, value: toNano("5"), bounce: false });
+        return blockchain.openContract(BrandJetton.fromAddress(addr!));
+    }
+
+    // ── Factory ───────────────────────────────────────────────────────────────
+
+    it("creates brand on sufficient fee", async () => {
+        await deployBrand(brandOwner, "TestBrand");
+        expect(await factory.getBrandCount()).toBe(1n);
+    });
+
+    it("rejects brand creation on insufficient fee", async () => {
+        const result = await factory.send(
+            brandOwner.getSender(),
+            { value: toNano("0.5") },
+            { $$type: "CreateBrand", name: "Cheap", symbol: "CHP", description: "", imageUrl: "" }
+        );
+        expect(result.transactions).toHaveTransaction({ success: false });
+    });
+
+    // ── BrandJetton ───────────────────────────────────────────────────────────
+
+    it("mints tokens to user (owner only)", async () => {
+        const brand = await deployBrand(brandOwner, "Alpha");
+        const mintResult = await brand.send(
+            brandOwner.getSender(),
+            { value: toNano("0.3") },
+            { $$type: "MintTo", queryId: 1n, to: user.address, amount: toNano("100") }
+        );
+        expect(mintResult.transactions).toHaveTransaction({ on: brand.address, success: true });
+
+        const wallet = blockchain.openContract(JettonWallet.fromAddress(await brand.getWalletAddress(user.address)));
+        expect(await wallet.getBalance()).toBe(toNano("100"));
+    });
+
+    it("rejects mint from non-owner", async () => {
+        const brand = await deployBrand(brandOwner, "Beta");
+        const result = await brand.send(
+            user.getSender(),
+            { value: toNano("0.2") },
+            { $$type: "MintTo", queryId: 1n, to: user.address, amount: toNano("50") }
+        );
+        expect(result.transactions).toHaveTransaction({ on: brand.address, success: false });
+    });
+
+    it("sets discount percent (owner only)", async () => {
+        const brand = await deployBrand(brandOwner, "Gamma");
+        await brand.send(brandOwner.getSender(), { value: toNano("0.05") }, { $$type: "SetDiscountPercent", percent: 20n });
+        expect(await brand.getDiscountPercent()).toBe(20n);
+    });
+
+    it("rejects invalid discount percent", async () => {
+        const brand = await deployBrand(brandOwner, "Delta");
+        const result = await brand.send(brandOwner.getSender(), { value: toNano("0.05") }, { $$type: "SetDiscountPercent", percent: 101n });
+        expect(result.transactions).toHaveTransaction({ on: brand.address, success: false });
+    });
+
+    // ── QR Payment (nonce) ────────────────────────────────────────────────────
+
+    async function sendPaymentWithNonce(brand: SandboxContract<BrandJetton>, buyer: SandboxContract<TreasuryContract>, nonce: bigint, queryId: bigint) {
+        const wallet = blockchain.openContract(JettonWallet.fromAddress(await brand.getWalletAddress(buyer.address)));
+        return wallet.send(
+            buyer.getSender(),
+            { value: toNano("1") },
+>>>>>>> ebad88c (Fix: token creation and wallet page)
             {
-                $$type: 'CreateBrand',
-                name: 'Coffee Coin',
-                symbol: 'COF',
-                description: 'Coffee loyalty program',
-                image: 'https://example.com/coffee.png',
+                $$type: "TokenTransfer",
+                queryId,
+                amount: toNano("10"),
+                destination: brand.address,
+                responseDestination: buyer.address,
+                customPayload: null,
+                forwardTonAmount: toNano("0.3"),
+                forwardPayload: beginCell().storeUint(1, 8).storeInt(nonce, 64).endCell().beginParse(),
             }
         );
+    }
 
-        expect(createResultA.transactions).toHaveTransaction({
-            from: deployer.address,
-            to: factory.address,
-            success: true
-        });
+    it("accepts payment with fresh nonce", async () => {
+        const brand = await deployBrand(brandOwner, "Epsilon");
+        await brand.send(brandOwner.getSender(), { value: toNano("0.3") }, { $$type: "MintTo", queryId: 1n, to: user.address, amount: toNano("100") });
 
+<<<<<<< HEAD
 <<<<<<< HEAD
 =======
         // Вычисляем адрес контракта Brand A через fromInit
@@ -77,21 +156,22 @@ describe('LoyalX System Test', () => {
 <<<<<<< HEAD
         await factory.send(
 =======
+=======
+        const result = await sendPaymentWithNonce(brand, user, 12345n, 2n);
+        expect(result.transactions).toHaveTransaction({ on: brand.address, success: true });
+    });
+>>>>>>> ebad88c (Fix: token creation and wallet page)
 
-        // Проверяем что бренд задеплоился
-        expect(createResultA.transactions).toHaveTransaction({
-            from: factory.address,
-            to: brandA.address,
-            success: true,
-            deploy: true,
-        });
+    it("rejects payment with replayed nonce", async () => {
+        const brand = await deployBrand(brandOwner, "Zeta");
+        await brand.send(brandOwner.getSender(), { value: toNano("0.3") }, { $$type: "MintTo", queryId: 1n, to: user.address, amount: toNano("200") });
 
-        // Проверяем геттер
-        const brandData = await brandA.getGetJettonData();
-        expect(brandData.name).toBe('Coffee Coin');
-        expect(brandData.symbol).toBe('COF');
-        expect(brandData.admin).toEqualAddress(deployer.address);
+        await sendPaymentWithNonce(brand, user, 99999n, 3n);
+        const replay = await sendPaymentWithNonce(brand, user, 99999n, 4n);
+        expect(replay.transactions).toHaveTransaction({ on: brand.address, success: false });
+    });
 
+<<<<<<< HEAD
         // ============================================================
         // ШАГ 2: Создаем Бренд Б (Burger Coin)
         // ============================================================
@@ -107,23 +187,18 @@ describe('LoyalX System Test', () => {
                 image: 'https://example.com/burger.png',
             }
         );
+=======
+    // ── Swap ──────────────────────────────────────────────────────────────────
+>>>>>>> ebad88c (Fix: token creation and wallet page)
 
-        expect(createResultB.transactions).toHaveTransaction({
-            from: deployer.address,
-            to: factory.address,
-            success: true
-        });
+    it("swaps tokens between brands after mutual acceptance", async () => {
+        const ownerA = await blockchain.treasury("ownerA");
+        const ownerB = await blockchain.treasury("ownerB");
 
-        const brandB = blockchain.openContract(
-            await BrandJetton.fromInit(
-                deployer.address,
-                'Burger Coin',
-                'BRG',
-                'Burger loyalty program',
-                'https://example.com/burger.png'
-            )
-        );
+        const brandA = await deployBrand(ownerA, "Aaa");
+        const brandB = await deployBrand(ownerB, "Bbb");
 
+<<<<<<< HEAD
 <<<<<<< HEAD
         const mintResult = await brandA.send(
             deployer.getSender(),
@@ -135,11 +210,15 @@ describe('LoyalX System Test', () => {
             success: true,
             deploy: true,
         });
+=======
+        // Mint 1000 A tokens to user
+        await brandA.send(ownerA.getSender(), { value: toNano("0.3") }, { $$type: "MintTo", queryId: 1n, to: user.address, amount: toNano("1000") });
+>>>>>>> ebad88c (Fix: token creation and wallet page)
 
-        // Проверяем что фабрика знает про 2 бренда
-        const numBrands = await factory.getNumBrands();
-        expect(numBrands).toBe(2n);
+        // ownerA proposes: 1000 A → 500 B (rate=500 means 500/1000 ratio)
+        await brandA.send(ownerA.getSender(), { value: toNano("0.1") }, { $$type: "ProposeRate", targetBrand: brandB.address, rate: 500n });
 
+<<<<<<< HEAD
         // ============================================================
         // ШАГ 3: Начисляем User'у 100 монет COF
         // ============================================================
@@ -153,13 +232,15 @@ describe('LoyalX System Test', () => {
                 amount: toNano('100')
             }
         );
+=======
+        // ownerB accepts proposal → brandB sends RateAccepted to brandA
+        const acceptResult = await brandB.send(ownerB.getSender(), { value: toNano("0.2") }, { $$type: "AcceptRate", sourceBrand: brandA.address });
+        expect(acceptResult.transactions).toHaveTransaction({ on: brandA.address, success: true });
+>>>>>>> ebad88c (Fix: token creation and wallet page)
 
-        expect(mintResult.transactions).toHaveTransaction({
-            from: deployer.address,
-            to: brandA.address,
-            success: true
-        });
+        expect(await brandA.getSwapActive(brandB.address)).toBe(true);
 
+<<<<<<< HEAD
 <<<<<<< HEAD
         const userWalletA_Address = await brandA.getGetWalletAddress(user.address);
         const walletInternalTransferTx = mintResult.transactions.find((tx: any) => 
@@ -310,13 +391,28 @@ describe('LoyalX System Test', () => {
         console.log('Тест завершён! Контракты работают.');
 =======
                 destination: userWalletB_Address,
+=======
+        // User swaps 100 A → should get 50 B (100 * 500 / 1000)
+        const userWalletA = blockchain.openContract(JettonWallet.fromAddress(await brandA.getWalletAddress(user.address)));
+        const swapResult = await userWalletA.send(
+            user.getSender(),
+            { value: toNano("1") },
+            {
+                $$type: "TokenTransfer",
+                queryId: 5n,
+                amount: toNano("100"),
+                destination: brandA.address,
+>>>>>>> ebad88c (Fix: token creation and wallet page)
                 responseDestination: user.address,
                 customPayload: null,
-                forwardTonAmount: toNano('2'),
-                forwardPayload: beginCell().storeAddress(brandA.address).endCell().asSlice()
+                forwardTonAmount: toNano("0.5"),
+                forwardPayload: beginCell().storeUint(2, 8).storeAddress(brandB.address).endCell().beginParse(),
             }
         );
+        expect(swapResult.transactions).toHaveTransaction({ on: brandA.address, success: true });
+        expect(swapResult.transactions).toHaveTransaction({ on: brandB.address, success: true });
 
+<<<<<<< HEAD
         expect(swapResult.transactions).toHaveTransaction({
             from: userWalletA.address,
             to: brandB_WalletForA_Address,
@@ -362,5 +458,9 @@ describe('LoyalX System Test', () => {
 
         console.log('All tests passed!');
 >>>>>>> 7e73c96 (fix: compilation error in brand_jetton.tact and improve swap logic)
+=======
+        const userWalletB = blockchain.openContract(JettonWallet.fromAddress(await brandB.getWalletAddress(user.address)));
+        expect(await userWalletB.getBalance()).toBe(toNano("50"));
+>>>>>>> ebad88c (Fix: token creation and wallet page)
     });
 });
