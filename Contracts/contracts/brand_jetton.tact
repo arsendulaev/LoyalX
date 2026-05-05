@@ -26,6 +26,8 @@ contract BrandJetton {
         self.imageUrl = imageUrl;
     }
 
+    receive() {}
+
     receive(msg: MintTo) {
         let ctx: Context = context();
         require(ctx.sender == self.owner || ctx.sender == self.factory, "Unauthorized mint");
@@ -48,12 +50,12 @@ contract BrandJetton {
         require(ctx.sender == expectedWallet, "Invalid wallet");
         self.totalSupply -= msg.amount;
         if (msg.responseDestination != null) {
-            send(SendParameters{
+            send(SendParameters {
                 to: msg.responseDestination!!,
                 value: 0,
                 bounce: false,
                 mode: SendRemainingValue,
-                body: TokenExcesses{ queryId: msg.queryId }.toCell()
+                body: TokenExcesses { queryId: msg.queryId }.toCell(),
             });
         }
     }
@@ -63,7 +65,10 @@ contract BrandJetton {
         let expectedWallet: Address = contractAddress(initOf JettonWallet(myAddress(), myAddress()));
         require(ctx.sender == expectedWallet, "Invalid wallet");
         let payload: Slice = msg.forwardPayload;
-        if (payload.bits() < 8) { return; }
+        if (payload.bits() < 8) {
+            return;
+        }
+
         let action: Int = payload.loadUint(8);
         if (action == 1) {
             require(payload.bits() >= 64, "Missing nonce");
@@ -82,17 +87,19 @@ contract BrandJetton {
         require(msg.rate > 0, "Rate must be positive");
         self.proposedRates.set(msg.targetBrand, msg.rate);
         self.acceptedByPeer.set(msg.targetBrand, false);
-        send(SendParameters{
+        send(SendParameters {
             to: msg.targetBrand,
             value: ton("0.02"),
             bounce: false,
             mode: SendPayGasSeparately,
-            body: IncomingProposal{ fromBrand: myAddress(), rate: msg.rate }.toCell()
+            body: IncomingProposal { fromBrand: myAddress(), rate: msg.rate }.toCell(),
         });
     }
 
     receive(msg: IncomingProposal) {
-        if (self.acceptedFrom.get(msg.fromBrand) == true) { return; }
+        if (self.acceptedFrom.get(msg.fromBrand) == true) {
+            return;
+        }
         self.incomingProposals.set(msg.fromBrand, msg.rate);
     }
 
@@ -101,16 +108,18 @@ contract BrandJetton {
         let inRate: Int? = self.incomingProposals.get(msg.sourceBrand);
         self.acceptedFrom.set(msg.sourceBrand, true);
         self.incomingProposals.del(msg.sourceBrand);
+
         if (inRate != null && inRate!! > 0) {
             self.proposedRates.set(msg.sourceBrand, 1000000 / inRate!!);
             self.acceptedByPeer.set(msg.sourceBrand, true);
         }
-        send(SendParameters{
+
+        send(SendParameters {
             to: msg.sourceBrand,
             value: ton("0.02"),
             bounce: false,
             mode: SendPayGasSeparately,
-            body: RateAccepted{ fromBrand: myAddress() }.toCell()
+            body: RateAccepted { fromBrand: myAddress() }.toCell(),
         });
     }
 
@@ -132,12 +141,13 @@ contract BrandJetton {
     receive(msg: RejectProposal) {
         require(context().sender == self.owner, "Only owner");
         self.incomingProposals.del(msg.fromBrand);
-        send(SendParameters{
+
+        send(SendParameters {
             to: msg.fromBrand,
             value: ton("0.02"),
             bounce: false,
             mode: SendPayGasSeparately,
-            body: RevokeRate{ peerBrand: myAddress() }.toCell()
+            body: RevokeRate { peerBrand: myAddress() }.toCell(),
         });
     }
 
@@ -149,37 +159,37 @@ contract BrandJetton {
 
     fun _mintToWallet(queryId: Int, to: Address, amount: Int) {
         let walletInit: StateInit = initOf JettonWallet(to, myAddress());
-        send(SendParameters{
+        send(SendParameters {
             to: contractAddress(walletInit),
             value: ton("0.05"),
             bounce: false,
             mode: SendPayGasSeparately,
-            body: TokenTransferInternal{
-                queryId: queryId,
-                amount: amount,
+            body: TokenTransferInternal {
+                queryId,
+                amount,
                 from: myAddress(),
                 responseAddress: self.owner,
                 forwardTonAmount: 0,
-                forwardPayload: emptySlice()
+                forwardPayload: emptySlice(),
             }.toCell(),
             code: walletInit.code,
-            data: walletInit.data
+            data: walletInit.data,
         });
     }
 
     fun _burnHeld(queryId: Int, amount: Int) {
         let walletInit: StateInit = initOf JettonWallet(myAddress(), myAddress());
-        send(SendParameters{
+        send(SendParameters {
             to: contractAddress(walletInit),
             value: ton("0.1"),
             bounce: true,
             mode: SendPayGasSeparately,
-            body: TokenBurn{
-                queryId: queryId,
-                amount: amount,
+            body: TokenBurn {
+                queryId,
+                amount,
                 responseDestination: null,
-                customPayload: null
-            }.toCell()
+                customPayload: null,
+            }.toCell(),
         });
     }
 
@@ -190,28 +200,29 @@ contract BrandJetton {
         let outAmount: Int = (amount * rate!!) / 1000;
         require(outAmount > 0, "Swap amount too small");
         self._burnHeld(queryId, amount);
-        send(SendParameters{
+
+        send(SendParameters {
             to: targetBrand,
             value: ton("0.1"),
             bounce: false,
             mode: SendPayGasSeparately,
-            body: SwapMint{
-                queryId: queryId,
+            body: SwapMint {
+                queryId,
                 to: user,
                 amount: outAmount,
-                sourceBrand: myAddress()
-            }.toCell()
+                sourceBrand: myAddress(),
+            }.toCell(),
         });
     }
 
     get fun data(): JettonData {
-        return JettonData{
+        return JettonData {
             totalSupply: self.totalSupply,
             owner: self.owner,
             name: self.name,
             symbol: self.symbol,
             description: self.description,
-            imageUrl: self.imageUrl
+            imageUrl: self.imageUrl,
         };
     }
 
@@ -221,22 +232,22 @@ contract BrandJetton {
 
     get fun get_jetton_data(): JettonMasterData {
         let content: map<Int as uint256, Cell> = emptyMap();
-        content.set(sha256("name"),        beginCell().storeUint(0, 8).storeSlice(self.name.asSlice()).endCell());
-        content.set(sha256("symbol"),      beginCell().storeUint(0, 8).storeSlice(self.symbol.asSlice()).endCell());
+        content.set(sha256("name"), beginCell().storeUint(0, 8).storeSlice(self.name.asSlice()).endCell());
+        content.set(sha256("symbol"), beginCell().storeUint(0, 8).storeSlice(self.symbol.asSlice()).endCell());
         content.set(sha256("description"), beginCell().storeUint(0, 8).storeSlice(self.description.asSlice()).endCell());
-        content.set(sha256("image"),       beginCell().storeUint(0, 8).storeSlice(self.imageUrl.asSlice()).endCell());
+        content.set(sha256("image"), beginCell().storeUint(0, 8).storeSlice(self.imageUrl.asSlice()).endCell());
 
         let contentCell: Cell = beginCell()
             .storeUint(0, 8)
             .storeMaybeRef(content.asCell())
             .endCell();
 
-        return JettonMasterData{
+        return JettonMasterData {
             totalSupply: self.totalSupply,
             mintable: true,
             adminAddress: self.owner,
             jettonContent: contentCell,
-            jettonWalletCode: (initOf JettonWallet(myAddress(), myAddress())).code
+            jettonWalletCode: (initOf JettonWallet(myAddress(), myAddress())).code,
         };
     }
 
@@ -250,13 +261,17 @@ contract BrandJetton {
 
     get fun proposedRate(targetBrand: Address): Int {
         let r: Int? = self.proposedRates.get(targetBrand);
-        if (r == null) { return 0; }
+        if (r == null) {
+            return 0;
+        }
         return r!!;
     }
 
     get fun swapActive(targetBrand: Address): Bool {
         let rate: Int? = self.proposedRates.get(targetBrand);
-        if (rate == null || rate!! == 0) { return false; }
+        if (rate == null || rate!! == 0) {
+            return false;
+        }
         return self.acceptedByPeer.get(targetBrand) == true;
     }
 

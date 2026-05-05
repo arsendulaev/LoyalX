@@ -4,16 +4,6 @@ import { storeMintTo, storeProposeRate, storeAcceptRate, storeRejectProposal, Mi
 import { storeTokenTransfer, TokenTransfer } from '../contracts/JettonWallet';
 import { getJettonInfo, getBatchJettonInfo, getUserJettons, runGetMethod, JettonMetadata } from './tonApiService';
 
-export interface BrandInfo {
-  address: string;
-  admin: string;
-  name: string;
-  symbol: string;
-  description: string;
-  image: string;
-  totalSupply: string;
-}
-
 export interface BrandBalance {
   brand: Address;
   balance: bigint;
@@ -33,7 +23,7 @@ export class ContractService {
   private pairsCache = new Map<string, { pairs: { brand: Address; rate: number }[]; ts: number }>();
   private readonly PAIRS_TTL = 30_000;
 
-  constructor(_client: unknown, factoryAddress: string) {
+  constructor(factoryAddress: string) {
     this.factoryAddress = factoryAddress;
   }
 
@@ -62,7 +52,6 @@ export class ContractService {
     const countResult = await runGetMethod(this.factoryAddress, 'brandCount');
     const numHex: string = countResult.stack?.[0]?.num ?? '0x0';
     const count = Number(BigInt(numHex));
-    console.log(`getAllBrands: factory has ${count} brands`);
 
     if (count === 0) {
       this.brandsCache = [];
@@ -95,18 +84,6 @@ export class ContractService {
 
     this.brandsCache = brands;
     return brands;
-  }
-
-  async getBrandInfo(brandAddress: Address): Promise<BrandInfo | null> {
-    const key = brandAddress.toRawString();
-    if (this.metaCache.has(key)) {
-      const m = this.metaCache.get(key)!;
-      return { address: key, admin: m.admin ?? '', name: m.name, symbol: m.symbol, description: m.description, image: m.image, totalSupply: m.totalSupply };
-    }
-    const info = await getJettonInfo(brandAddress.toString({ urlSafe: true, bounceable: true }));
-    if (!info) return null;
-    this.metaCache.set(key, info);
-    return { address: key, admin: info.admin ?? '', name: info.name, symbol: info.symbol, description: info.description, image: info.image, totalSupply: info.totalSupply };
   }
 
   async getUserBalances(userAddress: Address, attempts = 3): Promise<BrandBalance[]> {
@@ -146,7 +123,7 @@ export class ContractService {
       let info = infoMap.get(bounceable);
 
       if (!info) {
-        info = await this._getBrandMetaFromContract(brandAddr);
+        info = await this._getBrandMetaFromContract(brandAddr) ?? undefined;
       }
 
       const meta = info
@@ -163,40 +140,6 @@ export class ContractService {
     }
 
     return results;
-  }
-
-  async getOwnedBrands(userAddress: Address): Promise<{ address: Address; info: BrandInfo }[]> {
-    const brands = await this.getAllBrands();
-    const brandStrings = brands.map(b => b.toString({ urlSafe: true, bounceable: true }));
-    const infoMap = await getBatchJettonInfo(brandStrings);
-
-    const userRaw = userAddress.toRawString();
-    const owned: { address: Address; info: BrandInfo }[] = [];
-
-    for (const brandAddr of brands) {
-      const bounceable = brandAddr.toString({ urlSafe: true, bounceable: true });
-      const info = infoMap.get(bounceable);
-      if (!info) continue;
-
-      let adminRaw = '';
-      try { if (info.admin) adminRaw = Address.parse(info.admin).toRawString(); } catch {}
-      if (adminRaw !== userRaw) continue;
-
-      owned.push({
-        address: brandAddr,
-        info: {
-          address: brandAddr.toRawString(),
-          admin: info.admin ?? '',
-          name: info.name,
-          symbol: info.symbol,
-          description: info.description,
-          image: info.image,
-          totalSupply: info.totalSupply,
-        },
-      });
-    }
-
-    return owned;
   }
 
   private async _getBrandMetaFromContract(brandAddress: Address): Promise<JettonMetadata | null> {

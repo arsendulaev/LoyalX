@@ -42,6 +42,7 @@ message(0xd53276db) TokenExcesses {
     queryId: Int as uint64;
 }
 
+
 struct JettonData {
     totalSupply: Int;
     owner: Address;

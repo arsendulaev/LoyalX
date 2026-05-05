@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { Scanner } from '@yudiel/react-qr-scanner';
 import { Address, beginCell, toNano } from '@ton/core';
 import { useTonConnect } from '../hooks/useTonConnect';
@@ -18,19 +19,14 @@ function parseQR(raw: string): ParsedQR | null {
       const addressPart = url.pathname.replace('/', '');
       const amountParam = url.searchParams.get('amount');
       if (!addressPart || !amountParam) return null;
-      return {
-        brandAddress: Address.parse(addressPart),
-        amount: BigInt(amountParam),
-      };
+      return { brandAddress: Address.parse(addressPart), amount: BigInt(amountParam) };
     }
     if (raw.includes(':')) {
       const [addr, amt] = raw.split(':');
       return { brandAddress: Address.parse(addr), amount: BigInt(amt) };
     }
     return null;
-  } catch {
-    return null;
-  }
+  } catch { return null; }
 }
 
 interface Props {
@@ -47,23 +43,17 @@ export function EarnScanner({ onClose }: Props) {
       if (processing || !address || results.length === 0) return;
       const raw = results[0].rawValue;
       const parsed = parseQR(raw);
-      if (!parsed) {
-        setError('Неверный QR-код');
-        return;
-      }
+      if (!parsed) { setError('Неверный QR-код'); return; }
 
       setProcessing(true);
       setError(null);
       try {
         const brandAddrStr = parsed.brandAddress.toString({ urlSafe: true, bounceable: true });
         const userAddrStr = address.toString({ urlSafe: true, bounceable: true });
-
         const res = await runGetMethod(brandAddrStr, 'walletAddress', [userAddrStr]);
         const { Cell } = await import('@ton/core');
         const cellHex: string = res.stack?.[0]?.cell ?? res.stack?.[0]?.slice;
-        const jettonWalletAddress = Cell.fromBoc(Buffer.from(cellHex, 'hex'))[0]
-          .beginParse()
-          .loadAddress();
+        const jettonWalletAddress = Cell.fromBoc(Buffer.from(cellHex, 'hex'))[0].beginParse().loadAddress();
 
         const nonce = BigInt(Date.now());
         const message: TokenTransfer = {
@@ -74,35 +64,21 @@ export function EarnScanner({ onClose }: Props) {
           responseDestination: address,
           customPayload: null,
           forwardTonAmount: toNano('0.05'),
-          forwardPayload: beginCell()
-            .storeUint(1, 8)
-            .storeInt(nonce, 64)
-            .endCell()
-            .asSlice(),
+          forwardPayload: beginCell().storeUint(1, 8).storeInt(nonce, 64).endCell().asSlice(),
         };
 
-        const payload = beginCell()
-          .store(storeTokenTransfer(message))
-          .endCell()
-          .toBoc()
-          .toString('base64');
+        const payload = beginCell().store(storeTokenTransfer(message)).endCell().toBoc().toString('base64');
 
         await tonConnectUI.sendTransaction({
           validUntil: Math.floor(Date.now() / 1000) + 300,
-          messages: [
-            {
-              address: jettonWalletAddress.toString(),
-              amount: toNano('0.15').toString(),
-              payload,
-            },
-          ],
+          messages: [{ address: jettonWalletAddress.toString(), amount: toNano('0.15').toString(), payload }],
         });
 
         toast.success('Баллы списаны!');
         onClose();
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : String(e);
-        setError(msg.includes('User rejects') ? 'Отменено' : 'Ошибка при отправке');
+        setError(msg.includes('User rejects') ? 'Отменено' : 'Ошибка отправки');
       } finally {
         setProcessing(false);
       }
@@ -111,40 +87,76 @@ export function EarnScanner({ onClose }: Props) {
   );
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-black">
-      
-      <div className="flex items-center justify-between px-4 pt-4 pb-2">
-        <h2 className="text-white text-lg font-semibold">Сканировать QR</h2>
-        <button
-          onClick={onClose}
-          className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center text-white"
+    <AnimatePresence>
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        className="fixed inset-0 z-50 flex flex-col"
+        style={{ background: '#000' }}
+      >
+        <div
+          className="flex items-center justify-between px-4 pt-4 pb-3"
+          style={{ borderBottom: '0.5px solid rgba(255,255,255,0.06)' }}
         >
-          ✕
-        </button>
-      </div>
-
-      <div className="flex-1 relative">
-        <Scanner
-          onScan={handleScan}
-          onError={() => setError('Нет доступа к камере')}
-          constraints={{ facingMode: 'environment' }}
-          styles={{ container: { width: '100%', height: '100%' } }}
-        />
-        
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <div className="w-56 h-56 border-2 border-white rounded-2xl opacity-70" />
+          <span style={{ fontFamily: "'Syne', sans-serif", fontWeight: 700, fontSize: 14, letterSpacing: '0.15em', color: '#E0E0E0' }}>
+            СКАНИРОВАТЬ QR
+          </span>
+          <button
+            onClick={onClose}
+            style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'rgba(224,224,224,0.5)', letterSpacing: '0.1em' }}
+          >
+            [ESC]
+          </button>
         </div>
-      </div>
 
-      <div className="px-4 py-4 text-center">
-        {processing ? (
-          <p className="text-indigo-300 text-sm animate-pulse">Отправляем транзакцию…</p>
-        ) : error ? (
-          <p className="text-red-400 text-sm">{error}</p>
-        ) : (
-          <p className="text-gray-400 text-sm">Наведите камеру на QR-код бренда</p>
-        )}
-      </div>
-    </div>
+        <div className="flex-1 relative">
+          <Scanner
+            onScan={handleScan}
+            onError={() => setError('Нет доступа к камере')}
+            constraints={{ facingMode: 'environment' }}
+            styles={{ container: { width: '100%', height: '100%' } }}
+          />
+          
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <div style={{ position: 'relative', width: 220, height: 220 }}>
+              <div
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  border: '0.5px solid rgba(46,91,255,0.6)',
+                  boxShadow: '0 0 40px rgba(46,91,255,0.15), inset 0 0 40px rgba(46,91,255,0.05)',
+                }}
+              />
+              
+              {[
+                { top: -1, left: -1, borderTop: '2px solid #2E5BFF', borderLeft: '2px solid #2E5BFF' },
+                { top: -1, right: -1, borderTop: '2px solid #2E5BFF', borderRight: '2px solid #2E5BFF' },
+                { bottom: -1, left: -1, borderBottom: '2px solid #2E5BFF', borderLeft: '2px solid #2E5BFF' },
+                { bottom: -1, right: -1, borderBottom: '2px solid #2E5BFF', borderRight: '2px solid #2E5BFF' },
+              ].map((style, i) => (
+                <div key={i} style={{ position: 'absolute', width: 20, height: 20, ...style }} />
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="px-4 py-4 text-center" style={{ borderTop: '0.5px solid rgba(255,255,255,0.06)' }}>
+          {processing ? (
+            <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: '#2E5BFF', letterSpacing: '0.1em' }} className="animate-pulse">
+              ОТПРАВКА ТРАНЗАКЦИИ...
+            </p>
+          ) : error ? (
+            <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: '#ff4444' }}>
+              ОШИБКА: {error}
+            </p>
+          ) : (
+            <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'rgba(224,224,224,0.3)', letterSpacing: '0.08em' }}>
+              // Наведите камеру на QR-код бренда
+            </p>
+          )}
+        </div>
+      </motion.div>
+    </AnimatePresence>
   );
 }

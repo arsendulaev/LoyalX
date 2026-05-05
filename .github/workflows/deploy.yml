@@ -38,8 +38,9 @@ jobs:
           cd tgapp
           npm run build
         env:
-          VITE_TON_API_KEY: ${{ secrets.VITE_TON_API_KEY }}
+          VITE_TONAPI_KEY: ${{ secrets.VITE_TONAPI_KEY }}
           VITE_FACTORY_ADDRESS: ${{ secrets.VITE_FACTORY_ADDRESS }}
+          VITE_NOTIFY_SERVER_URL: ${{ secrets.VITE_NOTIFY_SERVER_URL }}
       
       - name: Setup Pages
         uses: actions/configure-pages@v4

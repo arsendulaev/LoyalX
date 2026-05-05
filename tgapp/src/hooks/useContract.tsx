@@ -2,13 +2,12 @@ import { createContext, useContext, useRef, ReactNode } from 'react';
 import { ContractService } from '../services/contractService';
 import { computeFactoryAddress } from '../contracts/computeAddress';
 
-const factoryAddress = computeFactoryAddress().toString();
-
 const ContractContext = createContext<ContractService | null>(null);
+
 export function ContractProvider({ children }: { children: ReactNode }) {
   const serviceRef = useRef<ContractService | null>(null);
   if (!serviceRef.current) {
-    serviceRef.current = new ContractService(null, factoryAddress);
+    serviceRef.current = new ContractService(computeFactoryAddress().toString());
   }
   return (
     <ContractContext.Provider value={serviceRef.current}>

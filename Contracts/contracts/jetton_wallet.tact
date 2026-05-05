@@ -16,27 +16,28 @@ contract JettonWallet {
         require(ctx.sender == self.master || ctx.sender == expectedWallet, "Unauthorized sender");
         self.balance += msg.amount;
         if (msg.forwardTonAmount > 0) {
-            send(SendParameters{
+            send(SendParameters {
                 to: self.owner,
                 value: 0,
                 bounce: false,
                 mode: SendRemainingValue,
-                body: TransferNotification{
+                body: TransferNotification {
                     queryId: msg.queryId,
                     amount: msg.amount,
                     sender: msg.from,
-                    forwardPayload: msg.forwardPayload
-                }.toCell()
+                    forwardPayload: msg.forwardPayload,
+                }.toCell(),
             });
             return;
         }
+
         if (msg.responseAddress != null) {
-            send(SendParameters{
+            send(SendParameters {
                 to: msg.responseAddress!!,
                 value: 0,
                 bounce: false,
                 mode: SendRemainingValue,
-                body: TokenExcesses{ queryId: msg.queryId }.toCell()
+                body: TokenExcesses { queryId: msg.queryId }.toCell(),
             });
         }
     }
@@ -48,21 +49,21 @@ contract JettonWallet {
         require(ctx.value >= ton("0.05"), "Insufficient TON for fees");
         self.balance -= msg.amount;
         let destWallet: Address = contractAddress(initOf JettonWallet(msg.destination, self.master));
-        send(SendParameters{
+        send(SendParameters {
             to: destWallet,
             value: 0,
             bounce: true,
             mode: SendRemainingValue,
-            body: TokenTransferInternal{
+            body: TokenTransferInternal {
                 queryId: msg.queryId,
                 amount: msg.amount,
                 from: self.owner,
                 responseAddress: msg.responseDestination,
                 forwardTonAmount: msg.forwardTonAmount,
-                forwardPayload: msg.forwardPayload
+                forwardPayload: msg.forwardPayload,
             }.toCell(),
             code: initOf JettonWallet(msg.destination, self.master).code,
-            data: initOf JettonWallet(msg.destination, self.master).data
+            data: initOf JettonWallet(msg.destination, self.master).data,
         });
     }
 
@@ -71,17 +72,18 @@ contract JettonWallet {
         require(ctx.sender == self.owner, "Only owner can burn");
         require(self.balance >= msg.amount, "Insufficient balance");
         self.balance -= msg.amount;
-        send(SendParameters{
+
+        send(SendParameters {
             to: self.master,
             value: 0,
             bounce: true,
             mode: SendRemainingValue,
-            body: TokenBurnNotification{
+            body: TokenBurnNotification {
                 queryId: msg.queryId,
                 amount: msg.amount,
                 sender: self.owner,
-                responseDestination: msg.responseDestination
-            }.toCell()
+                responseDestination: msg.responseDestination,
+            }.toCell(),
         });
     }
 
@@ -106,11 +108,11 @@ contract JettonWallet {
     }
 
     get fun get_wallet_data(): JettonWalletData {
-        return JettonWalletData{
+        return JettonWalletData {
             balance: self.balance,
             ownerAddress: self.owner,
             jettonMasterAddress: self.master,
-            jettonWalletCode: (initOf JettonWallet(self.owner, self.master)).code
+            jettonWalletCode: (initOf JettonWallet(self.owner, self.master)).code,
         };
     }
 }

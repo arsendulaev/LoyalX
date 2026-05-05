@@ -13,6 +13,7 @@ contract Factory {
         self.createFee = createFee;
         self.mintbackRate = mintbackRate;
     }
+
     receive() {}
 
     receive(msg: CreateBrand) {
@@ -24,30 +25,32 @@ contract Factory {
             msg.name,
             msg.symbol,
             msg.description,
-            msg.imageUrl
+            msg.imageUrl,
         );
         let brandAddr: Address = contractAddress(brandInit);
-        send(SendParameters{
+
+        send(SendParameters {
             to: brandAddr,
             value: ton("0.1"),
             bounce: false,
             mode: SendPayGasSeparately,
             code: brandInit.code,
             data: brandInit.data,
-            body: emptyCell()
+            body: emptyCell(),
         });
+
         let mintbackAmount: Int = (ctx.value * self.mintbackRate) / ton("1");
         if (mintbackAmount > 0) {
-            send(SendParameters{
+            send(SendParameters {
                 to: brandAddr,
                 value: ton("0.15"),
                 bounce: false,
                 mode: SendPayGasSeparately,
-                body: MintTo{
+                body: MintTo {
                     queryId: 0,
                     to: ctx.sender,
-                    amount: mintbackAmount
-                }.toCell()
+                    amount: mintbackAmount,
+                }.toCell(),
             });
         }
         self.brands.set(self.brandCount, brandAddr);
@@ -66,11 +69,11 @@ contract Factory {
 
     receive("withdraw") {
         require(context().sender == self.owner, "Only owner");
-        send(SendParameters{
+        send(SendParameters {
             to: self.owner,
             value: 0,
             bounce: false,
-            mode: SendRemainingBalance
+            mode: SendRemainingBalance,
         });
     }
 

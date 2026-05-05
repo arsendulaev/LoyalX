@@ -1,10 +1,13 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { motion } from 'framer-motion';
 import { useTonConnect } from '../hooks/useTonConnect';
 import { useContract } from '../hooks/useContract';
 import { useBrands } from '../hooks/useBrands';
 import { useTonConnectUI } from '@tonconnect/ui-react';
 import { Address } from '@ton/core';
 import toast from 'react-hot-toast';
+import { notifyEvent } from '../services/notificationService';
+import { handleTxError } from '../utils/toastError';
 
 interface InboxEntry {
   proposerAddress: string;
@@ -16,6 +19,23 @@ interface InboxEntry {
   rate: number;
 }
 
+const stagger = {
+  container: { hidden: {}, show: { transition: { staggerChildren: 0.07, delayChildren: 0.05 } } },
+  item: {
+    hidden: { opacity: 0, y: 20, filter: 'blur(4px)' },
+    show: { opacity: 1, y: 0, filter: 'blur(0px)', transition: { duration: 0.4, ease: "easeOut" as const } },
+  },
+};
+
+const labelStyle: React.CSSProperties = {
+  display: 'block',
+  fontFamily: "'JetBrains Mono', monospace",
+  fontSize: 9,
+  letterSpacing: '0.15em',
+  color: 'rgba(224,224,224,0.35)',
+  marginBottom: 6,
+};
+
 export function ExchangeRatesScreen() {
   const { connected } = useTonConnect();
   const contractService = useContract();
@@ -26,7 +46,6 @@ export function ExchangeRatesScreen() {
   const [targetBrand, setTargetBrand] = useState('');
   const [rate, setRate] = useState('');
   const [loading, setLoading] = useState(false);
-
   const [inbox, setInbox] = useState<InboxEntry[]>([]);
   const [inboxLoading, setInboxLoading] = useState(false);
 
@@ -75,24 +94,15 @@ export function ExchangeRatesScreen() {
       loadInbox();
     }
     if (!connected) loadedRef.current = false;
-  }, [connected, myBrands.length > 0]);
+  }, [connected, myBrands.length]);
 
   const handleSetRate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!contractService) return;
-
-    if (!rate || Number(rate) <= 0) {
-      toast.error('Укажите курс больше 0');
-      return;
-    }
-
+    if (!rate || Number(rate) <= 0) { toast.error('Укажите курс больше 0'); return; }
     const myRaw = Address.parse(myBrand).toRawString();
     const targetRaw = Address.parse(targetBrand).toRawString();
-    if (myRaw === targetRaw) {
-      toast.error('Нельзя установить курс для того же токена');
-      return;
-    }
-
+    if (myRaw === targetRaw) { toast.error('Нельзя установить курс для того же токена'); return; }
     setLoading(true);
     try {
       const myBrandAddress = Address.parse(myBrand);
@@ -100,58 +110,25 @@ export function ExchangeRatesScreen() {
       const rateScaled = BigInt(Math.round(Number(rate) * 1000));
       const targetOwned = brands.find(b => b.address.toString({ urlSafe: true, bounceable: true }) === targetBrand && b.isOwner);
       const messages: { address: string; amount: string; payload: string }[] = [];
-
       if (targetOwned) {
         const reverseRateScaled = rateScaled > 0n ? BigInt(Math.round(1000000 / Number(rateScaled))) : 0n;
         messages.push(
-          contractService.buildSetExchangeRatePayload({
-            brandAddress: myBrandAddress,
-            jettonMasterAddress: targetBrandAddress,
-            rate: rateScaled,
-          }),
-          contractService.buildSetExchangeRatePayload({
-            brandAddress: targetBrandAddress,
-            jettonMasterAddress: myBrandAddress,
-            rate: reverseRateScaled,
-          }),
-          contractService.buildAcceptRatePayload({
-            brandAddress: targetBrandAddress,
-            sourceBrand: myBrandAddress,
-          }),
-          contractService.buildAcceptRatePayload({
-            brandAddress: myBrandAddress,
-            sourceBrand: targetBrandAddress,
-          }),
+          contractService.buildSetExchangeRatePayload({ brandAddress: myBrandAddress, jettonMasterAddress: targetBrandAddress, rate: rateScaled }),
+          contractService.buildSetExchangeRatePayload({ brandAddress: targetBrandAddress, jettonMasterAddress: myBrandAddress, rate: reverseRateScaled }),
+          contractService.buildAcceptRatePayload({ brandAddress: targetBrandAddress, sourceBrand: myBrandAddress }),
+          contractService.buildAcceptRatePayload({ brandAddress: myBrandAddress, sourceBrand: targetBrandAddress }),
         );
       } else {
-        messages.push(
-          contractService.buildSetExchangeRatePayload({
-            brandAddress: myBrandAddress,
-            jettonMasterAddress: targetBrandAddress,
-            rate: rateScaled,
-          }),
-        );
+        messages.push(contractService.buildSetExchangeRatePayload({ brandAddress: myBrandAddress, jettonMasterAddress: targetBrandAddress, rate: rateScaled }));
       }
-
-      await tonConnectUI.sendTransaction({
-        validUntil: Math.floor(Date.now() / 1000) + 600,
-        messages,
-      });
-
-      toast.success(
-        targetOwned
-          ? 'Курс установлен в обоих направлениях — обмен активен!'
-          : 'Курс предложен. Ожидаем подтверждения от владельца бренда.'
-      );
+      await tonConnectUI.sendTransaction({ validUntil: Math.floor(Date.now() / 1000) + 600, messages });
+      toast.success(targetOwned ? 'Rate set both ways — swap active!' : 'Предложение отправлено. Ожидаем подтверждения владельца.');
+      const targetInfo = brands.find(b => b.address.toString({ urlSafe: true, bounceable: true }) === targetBrand);
+      notifyEvent('rate_proposed', { targetSymbol: targetInfo?.symbol ?? targetBrand });
       setRate('');
       setTimeout(loadInbox, 4000);
     } catch (error) {
-      const msg = (error as Error).message;
-      if (msg.includes('Interrupted') || msg.includes('cancel')) {
-        toast('Отменено', { icon: '✕' });
-      } else {
-        toast.error('Ошибка: ' + msg);
-      }
+      handleTxError(error);
     } finally {
       setLoading(false);
     }
@@ -160,47 +137,21 @@ export function ExchangeRatesScreen() {
   const handleAccept = async (entry: InboxEntry) => {
     if (!contractService) return;
     try {
-      const msg = contractService.buildAcceptRatePayload({
-        brandAddress: Address.parse(entry.myBrandAddress),
-        sourceBrand: Address.parse(entry.proposerAddress),
-      });
-      await tonConnectUI.sendTransaction({
-        validUntil: Math.floor(Date.now() / 1000) + 600,
-        messages: [msg],
-      });
+      const msg = contractService.buildAcceptRatePayload({ brandAddress: Address.parse(entry.myBrandAddress), sourceBrand: Address.parse(entry.proposerAddress) });
+      await tonConnectUI.sendTransaction({ validUntil: Math.floor(Date.now() / 1000) + 600, messages: [msg] });
       toast.success('Курс принят — обмен активен!');
       setTimeout(loadInbox, 4000);
-    } catch (error) {
-      const msg = (error as Error).message;
-      if (msg.includes('Interrupted') || msg.includes('cancel')) {
-        toast('Отменено', { icon: '✕' });
-      } else {
-        toast.error('Ошибка: ' + msg);
-      }
-    }
+    } catch (error) { handleTxError(error); }
   };
 
   const handleReject = async (entry: InboxEntry) => {
     if (!contractService) return;
     try {
-      const msg = contractService.buildRejectProposalPayload({
-        brandAddress: Address.parse(entry.myBrandAddress),
-        proposerBrand: Address.parse(entry.proposerAddress),
-      });
-      await tonConnectUI.sendTransaction({
-        validUntil: Math.floor(Date.now() / 1000) + 600,
-        messages: [msg],
-      });
+      const msg = contractService.buildRejectProposalPayload({ brandAddress: Address.parse(entry.myBrandAddress), proposerBrand: Address.parse(entry.proposerAddress) });
+      await tonConnectUI.sendTransaction({ validUntil: Math.floor(Date.now() / 1000) + 600, messages: [msg] });
       toast.success('Предложение отклонено');
       setTimeout(loadInbox, 4000);
-    } catch (error) {
-      const msg = (error as Error).message;
-      if (msg.includes('Interrupted') || msg.includes('cancel')) {
-        toast('Отменено', { icon: '✕' });
-      } else {
-        toast.error('Ошибка: ' + msg);
-      }
-    }
+    } catch (error) { handleTxError(error); }
   };
 
   const handleCounter = (entry: InboxEntry) => {
@@ -211,166 +162,212 @@ export function ExchangeRatesScreen() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  const myBrandInfo = brands.find(b => b.address.toString({ urlSafe: true, bounceable: true }) === myBrand);
+  const targetBrandInfo = brands.find(b => b.address.toString({ urlSafe: true, bounceable: true }) === targetBrand);
+  const bothOwned = !!brands.find(b => b.address.toString({ urlSafe: true, bounceable: true }) === targetBrand && b.isOwner);
+
   if (!connected) {
     return (
-      <div className="text-center py-16">
-        <p className="text-gray-400 text-sm">Подключите кошелёк для настройки курсов</p>
-      </div>
+      <motion.div initial={{ opacity: 0, y: 32 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
+        <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: 'rgba(224,224,224,0.3)' }}>
+          // Подключите кошелёк для настройки курсов
+        </p>
+      </motion.div>
     );
   }
 
   return (
-    <div className="space-y-4">
-      <h2 className="text-lg font-bold text-gray-800">Курсы обмена</h2>
-      
+    <motion.div variants={stagger.container} initial="hidden" animate="show" className="space-y-4">
+      <motion.div variants={stagger.item} className="flex items-end justify-between">
+        <span style={{ fontFamily: "'Syne', sans-serif", fontWeight: 800, fontSize: 22, letterSpacing: '0.05em', color: '#E0E0E0' }}>
+          КУРСЫ
+        </span>
+        <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: 'rgba(46,91,255,0.7)', letterSpacing: '0.1em' }}>
+          НАСТРОЙКА КУРСОВ
+        </span>
+      </motion.div>
+
       {myBrands.length > 0 && (
-        <div className="bg-white/80 backdrop-blur-sm rounded-2xl p-4 shadow-sm border border-gray-100">
+        <motion.div variants={stagger.item} className="brand-card rounded-sm p-4">
           <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-semibold text-gray-800">Входящие предложения</h3>
+            <span style={{ fontFamily: "'Syne', sans-serif", fontWeight: 700, fontSize: 11, letterSpacing: '0.12em', color: '#E0E0E0' }}>
+              ВХОДЯЩИЕ
+            </span>
             <button
               onClick={loadInbox}
               disabled={inboxLoading}
-              className="text-indigo-600 hover:text-indigo-700 disabled:opacity-50"
+              style={{ color: 'rgba(224,224,224,0.4)' }}
             >
-              <svg className={`w-4 h-4 ${inboxLoading ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              <svg className={inboxLoading ? 'animate-spin' : ''} width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
               </svg>
             </button>
           </div>
           {inboxLoading ? (
-            <div className="space-y-2">
-              <div className="skeleton h-16 w-full" />
-            </div>
+            <div className="skeleton h-14 w-full" />
           ) : inbox.length === 0 ? (
-            <p className="text-gray-400 text-xs text-center py-3">Нет входящих предложений</p>
+            <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'rgba(224,224,224,0.25)', textAlign: 'center', padding: '8px 0' }}>
+              // Нет входящих предложений
+            </p>
           ) : (
             <div className="space-y-2">
               {inbox.map((entry, i) => (
-                <div key={i} className="bg-blue-50/60 rounded-xl p-3 space-y-2">
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <p className="text-sm font-medium text-gray-800">
-                        {entry.proposerName} ({entry.proposerSymbol})
-                      </p>
-                      <p className="text-xs text-blue-700 mt-0.5">
-                        1 {entry.proposerSymbol} → {(entry.rate / 1000).toFixed(3).replace(/\.?0+$/, '')} {entry.myBrandSymbol}
-                      </p>
-                      <p className="text-xs text-gray-400 mt-0.5">для бренда {entry.myBrandName}</p>
-                    </div>
+                <div
+                  key={i}
+                  style={{
+                    padding: '10px 12px',
+                    background: 'rgba(46,91,255,0.05)',
+                    border: '0.5px solid rgba(46,91,255,0.15)',
+                    borderRadius: 2,
+                  }}
+                >
+                  <div className="mb-2">
+                    <p style={{ fontFamily: "'Syne', sans-serif", fontWeight: 600, fontSize: 12, color: '#E0E0E0' }}>
+                      {entry.proposerName} [{entry.proposerSymbol}]
+                    </p>
+                    <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: '#2E5BFF', marginTop: 2 }}>
+                      1 {entry.proposerSymbol} → {(entry.rate / 1000).toFixed(3).replace(/\.?0+$/, '')} {entry.myBrandSymbol}
+                    </p>
+                    <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: 'rgba(224,224,224,0.3)', marginTop: 1 }}>
+                      for {entry.myBrandName}
+                    </p>
                   </div>
                   <div className="flex gap-2">
-                    <button
-                      onClick={() => handleAccept(entry)}
-                      className="flex-1 py-1.5 bg-green-500 text-white rounded-lg text-xs font-semibold hover:bg-green-600 transition-colors"
-                    >
-                      Принять
-                    </button>
-                    <button
-                      onClick={() => handleReject(entry)}
-                      className="flex-1 py-1.5 bg-red-100 text-red-600 rounded-lg text-xs font-semibold hover:bg-red-200 transition-colors"
-                    >
-                      Отклонить
-                    </button>
-                    <button
-                      onClick={() => handleCounter(entry)}
-                      className="flex-1 py-1.5 bg-indigo-100 text-indigo-600 rounded-lg text-xs font-semibold hover:bg-indigo-200 transition-colors"
-                    >
-                      Встречное
-                    </button>
+                    {['ПРИНЯТЬ', 'ОТКЛОНИТЬ', 'ВСТРЕЧНОЕ'].map((label) => (
+                      <button
+                        key={label}
+                        onClick={() => label === 'ПРИНЯТЬ' ? handleAccept(entry) : label === 'ОТКЛОНИТЬ' ? handleReject(entry) : handleCounter(entry)}
+                        style={{
+                          flex: 1,
+                          padding: '5px 0',
+                          background: label === 'ПРИНЯТЬ' ? 'rgba(34,197,94,0.1)' : label === 'ОТКЛОНИТЬ' ? 'rgba(255,68,68,0.1)' : 'rgba(46,91,255,0.1)',
+                          border: `0.5px solid ${label === 'ПРИНЯТЬ' ? 'rgba(34,197,94,0.3)' : label === 'ОТКЛОНИТЬ' ? 'rgba(255,68,68,0.3)' : 'rgba(46,91,255,0.3)'}`,
+                          borderRadius: 2,
+                          fontFamily: "'JetBrains Mono', monospace",
+                          fontSize: 9,
+                          letterSpacing: '0.08em',
+                          color: label === 'ПРИНЯТЬ' ? '#22c55e' : label === 'ОТКЛОНИТЬ' ? '#ff4444' : '#2E5BFF',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {label}
+                      </button>
+                    ))}
                   </div>
                 </div>
               ))}
             </div>
           )}
-        </div>
+        </motion.div>
       )}
 
       {myBrands.length === 0 ? (
-        <div className="bg-white/80 backdrop-blur-sm rounded-2xl p-6 shadow-sm border border-gray-100 text-center">
-          <p className="text-gray-500 text-sm">У вас нет брендов</p>
-          <p className="text-gray-400 text-xs mt-1">Создайте бренд, чтобы настраивать курсы обмена</p>
-        </div>
+        <motion.div variants={stagger.item} className="brand-card rounded-sm p-6">
+          <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: 'rgba(224,224,224,0.3)' }}>
+            // Нет ваших брендов
+          </p>
+          <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'rgba(224,224,224,0.2)', marginTop: 4 }}>
+            // Создайте бренд для настройки курсов
+          </p>
+        </motion.div>
       ) : (
-        <form onSubmit={handleSetRate} className="space-y-4">
-          <div className="bg-white/80 backdrop-blur-sm rounded-2xl p-4 shadow-sm border border-gray-100 space-y-4">
+        <form onSubmit={handleSetRate} className="space-y-3">
+          <motion.div variants={stagger.item} className="brand-card rounded-sm p-4 space-y-4">
             <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1.5">Ваш бренд</label>
+              <label style={labelStyle}>МОЙ ТОКЕН</label>
               <select
                 value={myBrand}
                 onChange={(e) => { setMyBrand(e.target.value); if (e.target.value === targetBrand) setTargetBrand(''); }}
-                className="w-full px-3 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400 transition-all"
+                className="input-industrial w-full px-3 py-2.5 rounded-sm"
                 required
               >
-                <option value="">Выберите свой бренд</option>
+                <option value="">ВЫБЕРИТЕ СВОЙ БРЕНД</option>
                 {myBrands.map((b) => (
                   <option key={b.address.toString()} value={b.address.toString({ urlSafe: true, bounceable: true })}>
-                    {b.name} ({b.symbol})
+                    {b.name} [{b.symbol}]
                   </option>
                 ))}
               </select>
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1.5">Принимаемый токен</label>
+              <label style={labelStyle}>ВХОДЯЩИЙ ТОКЕН</label>
               <select
                 value={targetBrand}
                 onChange={(e) => setTargetBrand(e.target.value)}
-                className="w-full px-3 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400 transition-all"
+                className="input-industrial w-full px-3 py-2.5 rounded-sm"
                 required
               >
-                <option value="">Выберите входящий токен</option>
+                <option value="">ВЫБЕРИТЕ ВХОДЯЩИЙ ТОКЕН</option>
                 {otherBrands.map((b) => (
                   <option key={b.address.toString()} value={b.address.toString({ urlSafe: true, bounceable: true })}>
-                    {b.name} ({b.symbol})
+                    {b.name} [{b.symbol}]
                   </option>
                 ))}
               </select>
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1.5">
-                Курс (сколько принимаемых токенов за 1 ваш)
+              <label style={labelStyle}>
+                КУРС <span style={{ color: 'rgba(224,224,224,0.2)' }}>// входящих токенов за 1 ваш</span>
               </label>
               <input
                 type="number"
                 value={rate}
                 onChange={(e) => setRate(e.target.value)}
-                className="w-full px-3 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400 transition-all"
+                className="input-industrial w-full px-3 py-2.5 rounded-sm"
                 placeholder="1.5"
                 min="0.01"
                 step="0.01"
                 required
               />
             </div>
-          </div>
 
-          {myBrand && targetBrand && rate && (
-            <div className="bg-blue-50/80 rounded-xl p-3 text-xs text-blue-700 space-y-1">
-              <p>
-                1 {myBrands.find(b => b.address.toString({ urlSafe: true, bounceable: true }) === myBrand)?.symbol || '???'} ={' '}
-                {rate} {otherBrands.find(b => b.address.toString({ urlSafe: true, bounceable: true }) === targetBrand)?.symbol || '???'}
-              </p>
-              <p className="text-blue-500">
-                {brands.find(b => b.address.toString({ urlSafe: true, bounceable: true }) === targetBrand && b.isOwner)
-                  ? 'Курс будет установлен в обоих направлениях'
-                  : 'Предложение будет отправлено владельцу бренда для подтверждения'}
-              </p>
-            </div>
-          )}
+            {myBrandInfo && targetBrandInfo && rate && (
+              <div style={{
+                padding: '10px 12px',
+                background: 'rgba(46,91,255,0.05)',
+                border: '0.5px solid rgba(46,91,255,0.15)',
+                borderRadius: 2,
+              }}>
+                <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'rgba(224,224,224,0.6)' }}>
+                  1 {myBrandInfo.symbol} = {rate} {targetBrandInfo.symbol}
+                </p>
+                <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: bothOwned ? '#22c55e' : 'rgba(224,224,224,0.3)', marginTop: 4 }}>
+                  {bothOwned ? '// Курс сразу будет задан в обоих направлениях' : '// Предложение будет отправлено владельцу бренда'}
+                </p>
+                <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: 'rgba(224,224,224,0.25)', marginTop: 2 }}>
+                  ГАЗ ~0.07 TON
+                </p>
+              </div>
+            )}
+          </motion.div>
 
-          <div className="bg-indigo-50/80 rounded-xl p-3 text-xs text-indigo-600">
-            <p>Газ: ~0.07 TON (включает доставку предложения)</p>
-          </div>
-
-          <button
+          <motion.button
+            variants={stagger.item}
             type="submit"
             disabled={loading || !myBrand || !targetBrand}
-            className="w-full py-3 bg-indigo-600 text-white rounded-xl font-semibold text-sm hover:bg-indigo-700 active:bg-indigo-800 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed"
+            whileTap={{ scale: 0.98 }}
+            style={{
+              width: '100%',
+              padding: '14px',
+              background: loading || !myBrand || !targetBrand ? 'rgba(255,255,255,0.03)' : '#2E5BFF',
+              border: `0.5px solid ${loading || !myBrand || !targetBrand ? 'rgba(255,255,255,0.06)' : 'rgba(46,91,255,0.5)'}`,
+              borderRadius: 2,
+              fontFamily: "'Syne', sans-serif",
+              fontWeight: 700,
+              fontSize: 12,
+              letterSpacing: '0.15em',
+              color: loading || !myBrand || !targetBrand ? 'rgba(224,224,224,0.2)' : '#fff',
+              boxShadow: (!loading && myBrand && targetBrand) ? '0 0 30px rgba(46,91,255,0.25)' : 'none',
+              cursor: loading || !myBrand || !targetBrand ? 'not-allowed' : 'pointer',
+              transition: 'all 0.2s',
+            }}
           >
-            {loading ? 'Отправка...' : 'Предложить курс'}
-          </button>
+            {loading ? 'ОТПРАВКА...' : 'ПРЕДЛОЖИТЬ КУРС'}
+          </motion.button>
         </form>
       )}
-    </div>
+    </motion.div>
   );
 }

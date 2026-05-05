@@ -1,10 +1,30 @@
 import { useState, useEffect, useRef } from 'react';
+import { motion } from 'framer-motion';
 import { useTonConnect } from '../hooks/useTonConnect';
 import { useContract } from '../hooks/useContract';
 import { useBrands } from '../hooks/useBrands';
 import { useTonConnectUI } from '@tonconnect/ui-react';
 import { Address, toNano } from '@ton/core';
 import toast from 'react-hot-toast';
+import { notifyEvent } from '../services/notificationService';
+import { handleTxError } from '../utils/toastError';
+
+const stagger = {
+  container: { hidden: {}, show: { transition: { staggerChildren: 0.07, delayChildren: 0.05 } } },
+  item: {
+    hidden: { opacity: 0, y: 20, filter: 'blur(4px)' },
+    show: { opacity: 1, y: 0, filter: 'blur(0px)', transition: { duration: 0.4, ease: "easeOut" as const } },
+  },
+};
+
+const labelStyle: React.CSSProperties = {
+  display: 'block',
+  fontFamily: "'JetBrains Mono', monospace",
+  fontSize: 9,
+  letterSpacing: '0.15em',
+  color: 'rgba(224,224,224,0.35)',
+  marginBottom: 6,
+};
 
 export function SwapScreen() {
   const { connected, address } = useTonConnect();
@@ -15,136 +35,137 @@ export function SwapScreen() {
   const [toBrand, setToBrand] = useState('');
   const [amount, setAmount] = useState('');
   const [loading, setLoading] = useState(false);
-
   const [activePairs, setActivePairs] = useState<{ brandAddr: string; symbol: string; name: string; rate: number }[]>([]);
   const [pairsLoading, setPairsLoading] = useState(false);
   const requestIdRef = useRef(0);
 
   useEffect(() => {
-    if (!fromBrand || !contractService) {
-      setActivePairs([]);
-      return;
-    }
+    if (!fromBrand || !contractService) { setActivePairs([]); return; }
     const myReqId = ++requestIdRef.current;
     const fromAddr = Address.parse(fromBrand);
     const fromRaw = fromAddr.toRawString();
-    const others = brands
-      .filter(b => b.address.toRawString() !== fromRaw)
-      .map(b => b.address);
-
+    const others = brands.filter(b => b.address.toRawString() !== fromRaw).map(b => b.address);
     if (others.length === 0) { setActivePairs([]); return; }
-
     setPairsLoading(true);
     contractService.getActivePairs(fromAddr, others).then(pairs => {
       if (requestIdRef.current !== myReqId) return;
-      const entries = pairs.map(p => {
+      setActivePairs(pairs.map(p => {
         const info = brands.find(b => b.address.toRawString() === p.brand.toRawString());
-        return {
-          brandAddr: p.brand.toString({ urlSafe: true, bounceable: true }),
-          symbol: info?.symbol ?? '???',
-          name: info?.name ?? p.brand.toString().slice(0, 8) + '…',
-          rate: p.rate,
-        };
-      });
-      setActivePairs(entries);
-    }).finally(() => {
-      if (requestIdRef.current === myReqId) setPairsLoading(false);
-    });
+        return { brandAddr: p.brand.toString({ urlSafe: true, bounceable: true }), symbol: info?.symbol ?? '???', name: info?.name ?? p.brand.toString().slice(0, 8) + '…', rate: p.rate };
+      }));
+    }).finally(() => { if (requestIdRef.current === myReqId) setPairsLoading(false); });
   }, [fromBrand, contractService, brands]);
 
   const handleSwap = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!connected || !contractService || !address) return;
-
-    if (fromBrand === toBrand) {
-      toast.error('Нельзя обменять токен на тот же самый');
-      return;
-    }
-    if (!amount || Number(amount) <= 0) {
-      toast.error('Укажите количество');
-      return;
-    }
+    if (!connected || !contractService) return;
+    if (fromBrand === toBrand) { toast.error('Нельзя обменять токен на тот же'); return; }
+    if (!amount || Number(amount) <= 0) { toast.error('Укажите количество'); return; }
     const pair = activePairs.find(p => p.brandAddr === toBrand);
-    if (!pair) {
-      toast.error('Курс обмена не установлен для этой пары');
-      return;
-    }
-
+    if (!pair) { toast.error('Нет курса для этой пары'); return; }
     setLoading(true);
     try {
       const msg = await contractService.buildSwapPayload({
         fromBrandAddress: Address.parse(fromBrand),
         toBrandAddress: Address.parse(toBrand),
         amount: toNano(amount),
-        userAddress: address,
+        userAddress: address!,
       });
-
-      await tonConnectUI.sendTransaction({
-        validUntil: Math.floor(Date.now() / 1000) + 600,
-        messages: [msg],
-      });
-
+      await tonConnectUI.sendTransaction({ validUntil: Math.floor(Date.now() / 1000) + 600, messages: [msg] });
       toast.success('Обмен отправлен! Ожидайте подтверждения.');
+      const fromInfo = brands.find(b => b.address.toString({ urlSafe: true, bounceable: true }) === fromBrand);
+      notifyEvent('swap', { fromSymbol: fromInfo?.symbol ?? '', toSymbol: pair.symbol, amount });
       setAmount('');
     } catch (error) {
-      const msg = (error as Error).message;
-      if (msg.includes('Interrupted') || msg.includes('cancel')) {
-        toast('Отменено', { icon: '✕' });
-      } else {
-        toast.error('Ошибка: ' + msg);
-      }
+      handleTxError(error);
     } finally {
       setLoading(false);
     }
   };
 
+  const fromBrandInfo = brands.find(b => b.address.toString({ urlSafe: true, bounceable: true }) === fromBrand);
+  const toBrandInfo = brands.find(b => b.address.toString({ urlSafe: true, bounceable: true }) === toBrand);
+  const selectedPair = activePairs.find(p => p.brandAddr === toBrand);
+
   if (!connected) {
     return (
-      <div className="text-center py-16">
-        <p className="text-gray-400 text-sm">Подключите кошелёк для обмена токенов</p>
-      </div>
+      <motion.div initial={{ opacity: 0, y: 32 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
+        <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: 'rgba(224,224,224,0.3)' }}>
+          // Подключите кошелёк для обмена токенов
+        </p>
+      </motion.div>
     );
   }
 
-  const fromBrandInfo = brands.find(b => b.address.toString({ urlSafe: true, bounceable: true }) === fromBrand);
-  const toBrandInfo = brands.find(b => b.address.toString({ urlSafe: true, bounceable: true }) === toBrand);
-
   return (
-    <div className="space-y-4">
-      <h2 className="text-lg font-bold text-gray-800">Обмен токенов</h2>
+    <motion.div variants={stagger.container} initial="hidden" animate="show" className="space-y-4">
+      <motion.div variants={stagger.item} className="flex items-end justify-between">
+        <span style={{ fontFamily: "'Syne', sans-serif", fontWeight: 800, fontSize: 22, letterSpacing: '0.05em', color: '#E0E0E0' }}>
+          ОБМЕН
+        </span>
+        <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: 'rgba(46,91,255,0.7)', letterSpacing: '0.1em' }}>
+          ОБМЕН ТОКЕНАМИ
+        </span>
+      </motion.div>
 
       {brands.length < 2 ? (
-        <div className="bg-white/80 backdrop-blur-sm rounded-2xl p-6 shadow-sm border border-gray-100 text-center">
-          <p className="text-gray-500 text-sm">Для обмена нужно минимум 2 бренда</p>
-          <p className="text-gray-400 text-xs mt-1">Пока создано: {brands.length}</p>
-        </div>
+        <motion.div variants={stagger.item} className="brand-card rounded-sm p-6">
+          <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: 'rgba(224,224,224,0.3)' }}>
+            // Нужно минимум 2 бренда для обмена
+          </p>
+          <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'rgba(224,224,224,0.2)', marginTop: 4 }}>
+            // Создано: {brands.length}
+          </p>
+        </motion.div>
       ) : (
-        <form onSubmit={handleSwap} className="space-y-4">
-          <div className="bg-white/80 backdrop-blur-sm rounded-2xl p-4 shadow-sm border border-gray-100 space-y-4">
+        <form onSubmit={handleSwap} className="space-y-3">
+          <motion.div variants={stagger.item} className="brand-card rounded-sm p-4 space-y-4">
             <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1.5">Отдаю</label>
+              <label style={labelStyle}>ОТДАЮ</label>
               <select
                 value={fromBrand}
                 onChange={(e) => { setFromBrand(e.target.value); setToBrand(''); }}
-                className="w-full px-3 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400 transition-all"
+                className="input-industrial w-full px-3 py-2.5 rounded-sm"
                 required
               >
-                <option value="">Выберите токен</option>
+                <option value="">ВЫБЕРИТЕ ТОКЕН</option>
                 {brands.map((b) => (
                   <option key={b.address.toString()} value={b.address.toString({ urlSafe: true, bounceable: true })}>
-                    {b.name} ({b.symbol})
+                    {b.name} [{b.symbol}]
                   </option>
                 ))}
               </select>
             </div>
 
+            <div className="flex items-center justify-center">
+              <div
+                style={{
+                  width: 32,
+                  height: 32,
+                  border: '0.5px solid rgba(46,91,255,0.3)',
+                  borderRadius: 2,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  background: 'rgba(46,91,255,0.05)',
+                }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#2E5BFF" strokeWidth="1.5" strokeLinecap="square">
+                  <path d="M7 16V4m0 0L3 8m4-4l4 4M17 8v12m0 0l4-4m-4 4l-4-4" />
+                </svg>
+              </div>
+            </div>
+
             {fromBrand && (
               <div>
-                <p className="text-xs font-medium text-gray-500 mb-1.5">Доступные обмены</p>
-                {pairsLoading ? (
-                  <p className="text-xs text-gray-400 animate-pulse">Загружаем курсы…</p>
-                ) : activePairs.length === 0 ? (
-                  <p className="text-xs text-gray-400">Нет активных курсов для этого токена</p>
+                <label style={labelStyle}>
+                  ДОСТУПНЫЕ ПАРЫ
+                  {pairsLoading && <span style={{ marginLeft: 8, color: '#2E5BFF' }} className="animate-pulse">ЗАГРУЗКА...</span>}
+                </label>
+                {!pairsLoading && activePairs.length === 0 ? (
+                  <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'rgba(224,224,224,0.25)' }}>
+                    // Нет активных курсов для этого токена
+                  </p>
                 ) : (
                   <div className="space-y-1">
                     {activePairs.map(pair => (
@@ -152,15 +173,24 @@ export function SwapScreen() {
                         key={pair.brandAddr}
                         type="button"
                         onClick={() => setToBrand(pair.brandAddr)}
-                        className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs transition-all ${
-                          toBrand === pair.brandAddr
-                            ? 'bg-indigo-100 border border-indigo-300 text-indigo-700'
-                            : 'bg-gray-50 border border-gray-200 text-gray-700 hover:bg-gray-100'
-                        }`}
+                        style={{
+                          width: '100%',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          padding: '8px 12px',
+                          background: toBrand === pair.brandAddr ? 'rgba(46,91,255,0.1)' : 'rgba(255,255,255,0.03)',
+                          border: `0.5px solid ${toBrand === pair.brandAddr ? 'rgba(46,91,255,0.4)' : 'rgba(255,255,255,0.06)'}`,
+                          borderRadius: 2,
+                          cursor: 'pointer',
+                          transition: 'all 0.15s',
+                        }}
                       >
-                        <span className="font-medium">{fromBrandInfo?.symbol ?? '?'} → {pair.symbol}</span>
-                        <span className="text-gray-500">
-                          1 {fromBrandInfo?.symbol} = {(pair.rate / 1000).toFixed(3).replace(/\.?0+$/, '')} {pair.symbol}
+                        <span style={{ fontFamily: "'Syne', sans-serif", fontWeight: 600, fontSize: 11, color: toBrand === pair.brandAddr ? '#2E5BFF' : '#E0E0E0' }}>
+                          {fromBrandInfo?.symbol ?? '?'} → {pair.symbol}
+                        </span>
+                        <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: 'rgba(224,224,224,0.4)' }}>
+                          1:{(pair.rate / 1000).toFixed(3).replace(/\.?0+$/, '')}
                         </span>
                       </button>
                     ))}
@@ -170,12 +200,12 @@ export function SwapScreen() {
             )}
 
             <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1.5">Количество</label>
+              <label style={labelStyle}>КОЛИЧЕСТВО</label>
               <input
                 type="number"
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
-                className="w-full px-3 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400 transition-all"
+                className="input-industrial w-full px-3 py-2.5 rounded-sm"
                 placeholder="100"
                 min="0"
                 step="0.01"
@@ -183,52 +213,71 @@ export function SwapScreen() {
               />
             </div>
 
-            <div className="flex items-center justify-center py-1">
-              <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" strokeWidth="2.5">
-                  <path d="M7 16V4m0 0L3 8m4-4l4 4M17 8v12m0 0l4-4m-4 4l-4-4" />
-                </svg>
+            {toBrandInfo && (
+              <div>
+                <label style={labelStyle}>ПОЛУЧАЮ</label>
+                <div
+                  style={{
+                    padding: '10px 12px',
+                    background: 'rgba(46,91,255,0.06)',
+                    border: '0.5px solid rgba(46,91,255,0.2)',
+                    borderRadius: 2,
+                    fontFamily: "'Syne', sans-serif",
+                    fontWeight: 600,
+                    fontSize: 13,
+                    color: '#2E5BFF',
+                  }}
+                >
+                  {toBrandInfo.name} [{toBrandInfo.symbol}]
+                </div>
               </div>
-            </div>
+            )}
 
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1.5">Получаю</label>
-              {toBrand && toBrandInfo ? (
-                <div className="w-full px-3 py-2.5 bg-indigo-50 border border-indigo-200 rounded-xl text-sm text-indigo-800 font-medium">
-                  {toBrandInfo.name} ({toBrandInfo.symbol})
-                </div>
-              ) : (
-                <div className="w-full px-3 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm text-gray-400">
-                  Выберите курс выше
-                </div>
-              )}
-            </div>
-          </div>
-
-          {fromBrandInfo && toBrandInfo && amount && (
-            <div className="bg-amber-50/80 rounded-xl p-3 text-xs text-amber-700">
-              <p>Обмен {amount} {fromBrandInfo.symbol} → {toBrandInfo.symbol}</p>
-              {activePairs.find(p => p.brandAddr === toBrand) && (
-                <p className="mt-0.5 font-medium">
-                  ≈ {(Number(amount) * (activePairs.find(p => p.brandAddr === toBrand)!.rate / 1000)).toLocaleString('ru', { maximumFractionDigits: 4 })} {toBrandInfo.symbol}
+            {fromBrandInfo && toBrandInfo && amount && selectedPair && (
+              <div style={{
+                padding: '10px 12px',
+                background: 'rgba(255,255,255,0.02)',
+                border: '0.5px solid rgba(255,255,255,0.05)',
+                borderRadius: 2,
+              }}>
+                <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: 'rgba(224,224,224,0.5)' }}>
+                  {amount} {fromBrandInfo.symbol} ≈{' '}
+                  <span style={{ color: '#2E5BFF', fontWeight: 600 }}>
+                    {(Number(amount) * (selectedPair.rate / 1000)).toLocaleString('ru', { maximumFractionDigits: 4 })} {toBrandInfo.symbol}
+                  </span>
                 </p>
-              )}
-            </div>
-          )}
+                <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: 'rgba(224,224,224,0.25)', marginTop: 4 }}>
+                  ГАЗ ~0.5 TON
+                </p>
+              </div>
+            )}
+          </motion.div>
 
-          <div className="bg-indigo-50/80 rounded-xl p-3 text-xs text-indigo-600">
-            <p>Газ: ~0.5 TON</p>
-          </div>
-
-          <button
+          <motion.button
+            variants={stagger.item}
             type="submit"
             disabled={loading || !fromBrand || !toBrand || !activePairs.some(p => p.brandAddr === toBrand)}
-            className="w-full py-3 bg-indigo-600 text-white rounded-xl font-semibold text-sm hover:bg-indigo-700 active:bg-indigo-800 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed"
+            whileTap={{ scale: 0.98 }}
+            style={{
+              width: '100%',
+              padding: '14px',
+              background: loading || !fromBrand || !toBrand ? 'rgba(255,255,255,0.03)' : '#2E5BFF',
+              border: `0.5px solid ${loading || !fromBrand || !toBrand ? 'rgba(255,255,255,0.06)' : 'rgba(46,91,255,0.5)'}`,
+              borderRadius: 2,
+              fontFamily: "'Syne', sans-serif",
+              fontWeight: 700,
+              fontSize: 12,
+              letterSpacing: '0.15em',
+              color: loading || !fromBrand || !toBrand ? 'rgba(224,224,224,0.2)' : '#fff',
+              boxShadow: (!loading && fromBrand && toBrand) ? '0 0 30px rgba(46,91,255,0.25)' : 'none',
+              cursor: loading || !fromBrand || !toBrand ? 'not-allowed' : 'pointer',
+              transition: 'all 0.2s',
+            }}
           >
-            {loading ? 'Отправка...' : 'Обменять'}
-          </button>
+            {loading ? 'ОТПРАВКА...' : 'ВЫПОЛНИТЬ ОБМЕН'}
+          </motion.button>
         </form>
       )}
-    </div>
+    </motion.div>
   );
 }

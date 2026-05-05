@@ -1,6 +1,15 @@
 import { useState, useEffect, useCallback } from 'react';
+import { motion } from 'framer-motion';
 import { useTonConnect } from '../hooks/useTonConnect';
 import { getTransactionHistory, Transaction, TxType } from '../services/tonApiService';
+
+const stagger = {
+  container: { hidden: {}, show: { transition: { staggerChildren: 0.05, delayChildren: 0.05 } } },
+  item: {
+    hidden: { opacity: 0, x: -16 },
+    show: { opacity: 1, x: 0, transition: { duration: 0.35, ease: "easeOut" as const } },
+  },
+};
 
 export function TransactionHistoryScreen() {
   const { address, connected } = useTonConnect();
@@ -16,7 +25,7 @@ export function TransactionHistoryScreen() {
       const data = await getTransactionHistory(address.toString());
       setTxs(data);
     } catch (e: any) {
-      setError(e?.message ?? 'Ошибка загрузки');
+      setError(e?.message ?? 'Load error');
     } finally {
       setLoading(false);
     }
@@ -26,110 +35,138 @@ export function TransactionHistoryScreen() {
 
   if (!connected) {
     return (
-      <div className="flex flex-col items-center justify-center py-16 text-center">
-        <p className="text-gray-500 text-sm">Подключите кошелёк, чтобы видеть историю</p>
-      </div>
+      <motion.div initial={{ opacity: 0, y: 32 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
+        <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: 'rgba(224,224,224,0.3)' }}>
+          // Подключите кошелёк для просмотра истории
+        </p>
+      </motion.div>
     );
   }
 
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <h2 className="text-base font-semibold text-gray-800">История транзакций</h2>
+    <motion.div
+      variants={stagger.container}
+      initial="hidden"
+      animate="show"
+      className="space-y-3"
+    >
+      <motion.div variants={stagger.item} className="flex items-center justify-between">
+        <span style={{ fontFamily: "'Syne', sans-serif", fontWeight: 800, fontSize: 22, letterSpacing: '0.05em', color: '#E0E0E0' }}>
+          ЖУРНАЛ
+        </span>
         <button
           onClick={load}
           disabled={loading}
-          className="text-indigo-600 hover:text-indigo-700 disabled:opacity-50"
-          title="Обновить"
+          style={{ color: 'rgba(224,224,224,0.4)' }}
         >
-          <svg className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          <svg className={loading ? 'animate-spin' : ''} width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
           </svg>
         </button>
-      </div>
+      </motion.div>
 
       {loading ? (
-        <div className="space-y-3">
+        <div className="space-y-2">
           {Array.from({ length: 5 }).map((_, i) => (
-            <div key={i} className="skeleton h-16 w-full rounded-2xl" />
+            <div key={i} className="skeleton h-14 w-full rounded-sm" />
           ))}
         </div>
       ) : error ? (
-        <div className="text-center py-10">
-          <p className="text-red-400 text-sm mb-3">{error}</p>
-          <button onClick={load} className="text-indigo-600 text-sm underline">Повторить</button>
-        </div>
+        <motion.div variants={stagger.item} className="py-8">
+          <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: '#ff4444' }}>{error}</p>
+          <button onClick={load} style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: '#2E5BFF', marginTop: 8 }}>
+            ПОВТОРИТЬ →
+          </button>
+        </motion.div>
       ) : txs.length === 0 ? (
-        <div className="text-center py-12">
-          <p className="text-gray-400 text-sm">Транзакций нет</p>
-        </div>
+        <motion.div variants={stagger.item} className="py-12">
+          <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: 'rgba(224,224,224,0.3)' }}>
+            // Транзакций нет
+          </p>
+        </motion.div>
       ) : (
-        <div className="space-y-2">
-          {txs.map((tx) => (
-            <button
+        <div className="space-y-1.5">
+          {txs.map((tx, idx) => (
+            <motion.button
               key={tx.id}
+              variants={stagger.item}
+              custom={idx}
               onClick={() => window.open(tx.explorerUrl, '_blank')}
-              className="w-full text-left bg-white/80 backdrop-blur-sm rounded-2xl p-3 shadow-sm border border-gray-100 flex items-center gap-3 active:bg-gray-50 transition-colors"
+              whileHover={{ x: 4 }}
+              whileTap={{ scale: 0.99 }}
+              className="w-full text-left flex items-center gap-3 p-3"
+              style={{
+                background: 'rgba(255,255,255,0.02)',
+                border: '0.5px solid rgba(255,255,255,0.05)',
+                borderRadius: 2,
+                transition: 'border-color 0.15s',
+              }}
             >
-              <TxIcon type={tx.type} sign={tx.sign} />
+              <TxBadge type={tx.type} sign={tx.sign} />
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-gray-800 truncate">
+                <p style={{ fontFamily: "'Syne', sans-serif", fontWeight: 600, fontSize: 12, color: '#E0E0E0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {tx.tokenName}
                   {tx.tokenSymbol && tx.tokenSymbol !== tx.tokenName && (
-                    <span className="text-gray-400 ml-1 font-normal">{tx.tokenSymbol}</span>
+                    <span style={{ color: 'rgba(224,224,224,0.35)', fontWeight: 400, marginLeft: 6, fontSize: 10 }}>[{tx.tokenSymbol}]</span>
                   )}
                 </p>
-                <p className="text-xs text-gray-400">{tx.date}</p>
+                <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 9, color: 'rgba(224,224,224,0.3)', marginTop: 2 }}>
+                  {tx.date}
+                </p>
               </div>
               <div className="text-right flex-shrink-0">
-                <p className={`text-sm font-bold ${tx.sign === '+' ? 'text-emerald-600' : 'text-gray-700'}`}>
+                <p style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, fontSize: 14, color: tx.sign === '+' ? '#22c55e' : '#E0E0E0' }}>
                   {tx.sign}{tx.amount}
                 </p>
-                <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
-                  tx.status === 'success' ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-500'
-                }`}>
-                  {tx.status === 'success' ? 'ok' : 'fail'}
+                <span style={{
+                  fontFamily: "'JetBrains Mono', monospace",
+                  fontSize: 8,
+                  letterSpacing: '0.1em',
+                  color: tx.status === 'success' ? 'rgba(34,197,94,0.7)' : 'rgba(255,68,68,0.7)',
+                }}>
+                  {tx.status === 'success' ? 'ОК' : 'ОШИБКА'}
                 </span>
               </div>
-            </button>
+            </motion.button>
           ))}
         </div>
       )}
-    </div>
+    </motion.div>
   );
 }
 
-function TxIcon({ type, sign }: { type: TxType; sign: '+' | '-' }) {
-  const color = sign === '+' ? '#10b981' : '#6b7280';
-  const bg = sign === '+' ? 'bg-emerald-50' : 'bg-gray-100';
+const txTypeLabels: Record<TxType, string> = {
+  Mint: 'MNT',
+  Burn: 'BRN',
+  Swap: 'SWP',
+  Transfer: 'TRF',
+};
 
-  const icons: Record<TxType, JSX.Element> = {
-    Mint: (
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <circle cx="12" cy="12" r="10" />
-        <path d="M12 8v8M8 12h8" />
-      </svg>
-    ),
-    Burn: (
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5 13H7l5-8 5 8z" />
-      </svg>
-    ),
-    Swap: (
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M7 16V4m0 0L3 8m4-4l4 4M17 8v12m0 0l4-4m-4 4l-4-4" />
-      </svg>
-    ),
-    Transfer: (
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M5 12h14M12 5l7 7-7 7" />
-      </svg>
-    ),
-  };
-
+function TxBadge({ type, sign }: { type: TxType; sign: '+' | '-' }) {
+  const isIncoming = sign === '+';
   return (
-    <div className={`w-9 h-9 rounded-full ${bg} flex items-center justify-center flex-shrink-0`}>
-      {icons[type]}
+    <div
+      style={{
+        width: 36,
+        height: 36,
+        borderRadius: 2,
+        flexShrink: 0,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: isIncoming ? 'rgba(34,197,94,0.08)' : 'rgba(255,255,255,0.04)',
+        border: `0.5px solid ${isIncoming ? 'rgba(34,197,94,0.2)' : 'rgba(255,255,255,0.08)'}`,
+      }}
+    >
+      <span style={{
+        fontFamily: "'JetBrains Mono', monospace",
+        fontSize: 9,
+        letterSpacing: '0.05em',
+        color: isIncoming ? '#22c55e' : 'rgba(224,224,224,0.5)',
+        fontWeight: 600,
+      }}>
+        {txTypeLabels[type]}
+      </span>
     </div>
   );
 }

@@ -3,6 +3,7 @@ import { Address } from '@ton/core';
 import { BrandBalance } from '../services/contractService';
 import { useTonConnect } from './useTonConnect';
 import { useContract } from './useContract';
+import { registerForNotifications } from '../services/notificationService';
 
 export interface BrandEntry {
   address: Address;
@@ -80,6 +81,8 @@ export function BrandsProvider({ children }: { children: ReactNode }) {
       setBalances(data);
       updateBrands(data, address);
       if (data.length === 0) startPolling(0);
+      const brandAddrs = data.map(b => b.brand.toString({ urlSafe: true, bounceable: true }));
+      registerForNotifications(address.toString({ urlSafe: true, bounceable: true }), brandAddrs);
     } catch (e: any) {
       setError('Не удалось загрузить данные');
       console.error('BrandsProvider load error:', e);
