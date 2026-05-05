@@ -37,15 +37,15 @@ export function WalletScreen() {
         className="flex flex-col items-start justify-center py-16"
       >
         <div style={{ fontFamily: "'Syne', sans-serif", fontSize: 11, letterSpacing: '0.2em', color: 'rgba(224,224,224,0.3)', marginBottom: 16 }}>
-          СИС.ТРЕБУЕТСЯ_ПОДКЛЮЧЕНИЕ
+          ТРЕБУЕТСЯ ПОДКЛЮЧЕНИЕ
         </div>
         <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 800, fontSize: 32, lineHeight: 1.1, color: '#E0E0E0', marginBottom: 8 }}>
           ПОДКЛЮЧИТЕ<br />
           <span style={{ color: '#2E5BFF' }}>КОШЕЛЁК</span>
         </div>
         <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: 'rgba(224,224,224,0.4)', marginTop: 12, lineHeight: 1.6 }}>
-          // TON wallet required to access<br />
-          // LoyalX loyalty infrastructure
+          // Чтобы получить доступ к LoyalX<br />
+          // требуется TON кошелёк
         </p>
         <div style={{ width: 40, height: 0.5, background: 'rgba(46,91,255,0.5)', marginTop: 24 }} />
       </motion.div>
