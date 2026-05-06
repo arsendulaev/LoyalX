@@ -55,6 +55,7 @@ export function CreateBrandScreen() {
 
       await tonConnectUI.sendTransaction({
         validUntil: Math.floor(Date.now() / 1000) + 600,
+        network: '-3',
         messages: [msg],
       });
 

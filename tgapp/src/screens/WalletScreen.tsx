@@ -4,6 +4,7 @@ import { useTonConnect } from '../hooks/useTonConnect';
 import { useBrands } from '../hooks/useBrands';
 import { EarnScanner } from '../components/EarnScanner';
 import { QRCodeSVG } from 'qrcode.react';
+import { useIsConnectionRestored } from '@tonconnect/ui-react';
 
 const PAGE_SIZE = 10;
 
@@ -20,6 +21,7 @@ const stagger = {
 
 export function WalletScreen() {
   const { address, connected } = useTonConnect();
+  const connectionRestored = useIsConnectionRestored();
   const { balances, loading, polling, error, reload } = useBrands();
   const [scanOpen, setScanOpen] = useState(false);
   const [showAddressQR, setShowAddressQR] = useState(false);
@@ -27,6 +29,14 @@ export function WalletScreen() {
 
   const totalPages = Math.ceil(balances.length / PAGE_SIZE);
   const pagedBalances = balances.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+
+  if (!connectionRestored) {
+    return (
+      <div className="space-y-2">
+        {[1, 2, 3].map(i => <div key={i} className="skeleton h-14 w-full" />)}
+      </div>
+    );
+  }
 
   if (!connected) {
     return (
@@ -54,6 +64,7 @@ export function WalletScreen() {
 
   return (
     <motion.div
+      key={address?.toString() ?? 'wallet'}
       variants={stagger.container}
       initial="hidden"
       animate="show"

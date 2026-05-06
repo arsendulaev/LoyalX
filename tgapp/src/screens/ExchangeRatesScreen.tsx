@@ -121,7 +121,7 @@ export function ExchangeRatesScreen() {
       } else {
         messages.push(contractService.buildSetExchangeRatePayload({ brandAddress: myBrandAddress, jettonMasterAddress: targetBrandAddress, rate: rateScaled }));
       }
-      await tonConnectUI.sendTransaction({ validUntil: Math.floor(Date.now() / 1000) + 600, messages });
+      await tonConnectUI.sendTransaction({ validUntil: Math.floor(Date.now() / 1000) + 600, network: '-3', messages });
       toast.success(targetOwned ? 'Rate set both ways — swap active!' : 'Предложение отправлено. Ожидаем подтверждения владельца.');
       const targetInfo = brands.find(b => b.address.toString({ urlSafe: true, bounceable: true }) === targetBrand);
       notifyEvent('rate_proposed', { targetSymbol: targetInfo?.symbol ?? targetBrand });
@@ -138,7 +138,7 @@ export function ExchangeRatesScreen() {
     if (!contractService) return;
     try {
       const msg = contractService.buildAcceptRatePayload({ brandAddress: Address.parse(entry.myBrandAddress), sourceBrand: Address.parse(entry.proposerAddress) });
-      await tonConnectUI.sendTransaction({ validUntil: Math.floor(Date.now() / 1000) + 600, messages: [msg] });
+      await tonConnectUI.sendTransaction({ validUntil: Math.floor(Date.now() / 1000) + 600, network: '-3', messages: [msg] });
       toast.success('Курс принят — обмен активен!');
       setTimeout(loadInbox, 4000);
     } catch (error) { handleTxError(error); }
@@ -148,7 +148,7 @@ export function ExchangeRatesScreen() {
     if (!contractService) return;
     try {
       const msg = contractService.buildRejectProposalPayload({ brandAddress: Address.parse(entry.myBrandAddress), proposerBrand: Address.parse(entry.proposerAddress) });
-      await tonConnectUI.sendTransaction({ validUntil: Math.floor(Date.now() / 1000) + 600, messages: [msg] });
+      await tonConnectUI.sendTransaction({ validUntil: Math.floor(Date.now() / 1000) + 600, network: '-3', messages: [msg] });
       toast.success('Предложение отклонено');
       setTimeout(loadInbox, 4000);
     } catch (error) { handleTxError(error); }
