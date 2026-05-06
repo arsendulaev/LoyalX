@@ -184,7 +184,7 @@ export class ContractService {
       imageUrl: params.image,
     };
     return {
-      address: this.factoryAddress,
+      address: Address.parse(this.factoryAddress).toRawString(),
       amount: toNano('1.1').toString(),
       payload: beginCell().store(storeCreateBrand(message)).endCell().toBoc().toString('base64'),
     };
@@ -197,7 +197,7 @@ export class ContractService {
       $$type: 'MintTo', queryId: 0n, to: params.to, amount: params.amount,
     };
     return {
-      address: params.brandAddress.toString(),
+      address: params.brandAddress.toRawString(),
       amount: toNano('0.2').toString(),
       payload: beginCell().store(storeMintTo(message)).endCell().toBoc().toString('base64'),
     };
@@ -210,7 +210,7 @@ export class ContractService {
       $$type: 'ProposeRate', targetBrand: params.jettonMasterAddress, rate: params.rate,
     };
     return {
-      address: params.brandAddress.toString(),
+      address: params.brandAddress.toRawString(),
       amount: toNano('0.05').toString(),
       payload: beginCell().store(storeProposeRate(message)).endCell().toBoc().toString('base64'),
     };
@@ -223,7 +223,7 @@ export class ContractService {
       $$type: 'AcceptRate', sourceBrand: params.sourceBrand,
     };
     return {
-      address: params.brandAddress.toString(),
+      address: params.brandAddress.toRawString(),
       amount: toNano('0.05').toString(),
       payload: beginCell().store(storeAcceptRate(message)).endCell().toBoc().toString('base64'),
     };
@@ -236,7 +236,7 @@ export class ContractService {
       $$type: 'RejectProposal', fromBrand: params.proposerBrand,
     };
     return {
-      address: params.brandAddress.toString(),
+      address: params.brandAddress.toRawString(),
       amount: toNano('0.05').toString(),
       payload: beginCell().store(storeRejectProposal(message)).endCell().toBoc().toString('base64'),
     };
@@ -317,7 +317,7 @@ export class ContractService {
       forwardPayload: beginCell().storeUint(2, 8).storeAddress(params.toBrandAddress).endCell().asSlice(),
     };
     return {
-      address: walletAddress.toString(),
+      address: walletAddress.toRawString(),
       amount: toNano('0.5').toString(),
       payload: beginCell().store(storeTokenTransfer(message)).endCell().toBoc().toString('base64'),
     };

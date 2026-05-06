@@ -71,7 +71,7 @@ export function SwapScreen() {
         amount: toNano(amount),
         userAddress: address!,
       });
-      await tonConnectUI.sendTransaction({ validUntil: Math.floor(Date.now() / 1000) + 600, messages: [msg] });
+      await tonConnectUI.sendTransaction({ validUntil: Math.floor(Date.now() / 1000) + 600, network: '-3', messages: [msg] });
       toast.success('Обмен отправлен! Ожидайте подтверждения.');
       const fromInfo = brands.find(b => b.address.toString({ urlSafe: true, bounceable: true }) === fromBrand);
       notifyEvent('swap', { fromSymbol: fromInfo?.symbol ?? '', toSymbol: pair.symbol, amount });

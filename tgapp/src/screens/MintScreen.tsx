@@ -125,7 +125,7 @@ export function MintScreen() {
         to: Address.parse(ContractService.toBounceable(recipient)),
         amount: toNano(amount),
       });
-      await tonConnectUI.sendTransaction({ validUntil: Math.floor(Date.now() / 1000) + 300, messages: [msg] });
+      await tonConnectUI.sendTransaction({ validUntil: Math.floor(Date.now() / 1000) + 300, network: '-3', messages: [msg] });
       toast.success('Токены начислены!');
       const brand = ownedBrands.find(b => b.address.toString({ urlSafe: true, bounceable: true }) === selectedBrand);
       notifyEvent('mint', { symbol: brand?.symbol ?? selectedBrand });

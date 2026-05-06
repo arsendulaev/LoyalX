@@ -4,6 +4,7 @@ import { BrandBalance } from '../services/contractService';
 import { useTonConnect } from './useTonConnect';
 import { useContract } from './useContract';
 import { registerForNotifications } from '../services/notificationService';
+import { useIsConnectionRestored } from '@tonconnect/ui-react';
 
 export interface BrandEntry {
   address: Address;
@@ -25,6 +26,7 @@ const BrandsContext = createContext<BrandsState | null>(null);
 
 export function BrandsProvider({ children }: { children: ReactNode }) {
   const { address, connected } = useTonConnect();
+  const connectionRestored = useIsConnectionRestored();
   const contractService = useContract();
 
   const [brands, setBrands] = useState<BrandEntry[]>([]);
@@ -92,6 +94,7 @@ export function BrandsProvider({ children }: { children: ReactNode }) {
   }, [connected, address, contractService]);
 
   useEffect(() => {
+    if (!connectionRestored) return;
     if (connected && address) {
       reload();
     } else {
@@ -100,7 +103,7 @@ export function BrandsProvider({ children }: { children: ReactNode }) {
       stopPolling();
     }
     return stopPolling;
-  }, [connected, address]);
+  }, [connected, address, connectionRestored]);
 
   return (
     <BrandsContext.Provider value={{ brands, balances, loading, polling, error, reload }}>
