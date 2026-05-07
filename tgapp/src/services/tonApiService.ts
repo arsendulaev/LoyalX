@@ -23,21 +23,56 @@ async function sleep(ms: number) {
   return new Promise(r => setTimeout(r, ms));
 }
 
+const RATE_LIMIT_PER_SEC = 8;
+let bucketTokens = RATE_LIMIT_PER_SEC;
+let lastRefill = Date.now();
+const waiters: (() => void)[] = [];
+
+function refill() {
+  const now = Date.now();
+  const elapsed = (now - lastRefill) / 1000;
+  if (elapsed > 0) {
+    bucketTokens = Math.min(RATE_LIMIT_PER_SEC, bucketTokens + elapsed * RATE_LIMIT_PER_SEC);
+    lastRefill = now;
+  }
+}
+
+async function acquireToken(): Promise<void> {
+  refill();
+  if (bucketTokens >= 1) { bucketTokens -= 1; return; }
+  await new Promise<void>(resolve => waiters.push(resolve));
+  bucketTokens -= 1;
+}
+
+setInterval(() => {
+  refill();
+  while (waiters.length && bucketTokens >= 1) {
+    const w = waiters.shift()!;
+    w();
+  }
+}, 60);
+
 async function tonApiGet<T>(path: string, attempts = 4): Promise<T> {
   const headers: Record<string, string> = { Accept: 'application/json' };
   if (TONAPI_KEY) headers['Authorization'] = `Bearer ${TONAPI_KEY}`;
   for (let i = 0; i < attempts; i++) {
+    await acquireToken();
     const res = await fetch(`${TONAPI_BASE}${path}`, { headers });
     if (res.ok) return res.json() as Promise<T>;
     if (res.status === 429 || res.status >= 500) {
       if (i < attempts - 1) {
-        await sleep(500 * (i + 1));
+        await sleep(700 * (i + 1));
         continue;
       }
     }
     throw new Error(`TonAPI ${res.status}: ${path}`);
   }
   throw new Error(`TonAPI: all attempts failed: ${path}`);
+}
+
+export async function getAccountData(accountId: string): Promise<string | null> {
+  const res = await tonApiGet<any>(`/blockchain/accounts/${encodeURIComponent(accountId)}`);
+  return typeof res?.data === 'string' && res.data.length > 0 ? res.data : null;
 }
 
 export async function getJettonInfo(masterAddress: string): Promise<JettonMetadata | null> {

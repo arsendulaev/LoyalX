@@ -44,7 +44,7 @@ export function BrandsProvider({ children }: { children: ReactNode }) {
   const startPolling = useCallback((prevCount: number) => {
     if (!address) return;
     let attempts = 0;
-    const MAX = 10;
+    const MAX = 6;
     setPolling(true);
     const tick = async () => {
       if (attempts >= MAX) { setPolling(false); return; }
@@ -56,9 +56,9 @@ export function BrandsProvider({ children }: { children: ReactNode }) {
         updateBrands(data, address);
         if (data.length > prevCount) { setPolling(false); return; }
       } catch {}
-      pollRef.current = setTimeout(tick, 3000);
+      pollRef.current = setTimeout(tick, 8000);
     };
-    pollRef.current = setTimeout(tick, 3000);
+    pollRef.current = setTimeout(tick, 8000);
   }, [address, contractService]);
 
   const updateBrands = (data: BrandBalance[], userAddress: Address) => {

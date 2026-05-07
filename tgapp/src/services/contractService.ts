@@ -1,8 +1,29 @@
 import { Address, toNano, beginCell, Cell, Dictionary } from '@ton/core';
-import { storeCreateBrand, CreateBrand } from '../contracts/Factory';
-import { storeMintTo, storeProposeRate, storeAcceptRate, storeRejectProposal, MintTo, ProposeRate, AcceptRate, RejectProposal } from '../contracts/BrandJetton';
+import { storeCreateBrand, CreateBrand, loadFactory$Data } from '../contracts/Factory';
+import { storeMintTo, storeProposeRate, storeAcceptRate, storeRejectProposal, MintTo, ProposeRate, AcceptRate, RejectProposal, loadBrandJetton$Data } from '../contracts/BrandJetton';
 import { storeTokenTransfer, TokenTransfer } from '../contracts/JettonWallet';
-import { getJettonInfo, getBatchJettonInfo, getUserJettons, runGetMethod, JettonMetadata } from './tonApiService';
+import { getBatchJettonInfo, getUserJettons, getAccountData, runGetMethod, JettonMetadata } from './tonApiService';
+
+const META_LS_KEY = 'loyalx:meta:v1';
+
+function loadMetaFromStorage(): Map<string, JettonMetadata> {
+  try {
+    const raw = localStorage.getItem(META_LS_KEY);
+    if (!raw) return new Map();
+    const obj = JSON.parse(raw);
+    return new Map(Object.entries(obj));
+  } catch {
+    return new Map();
+  }
+}
+
+function saveMetaToStorage(map: Map<string, JettonMetadata>) {
+  try {
+    const obj: Record<string, JettonMetadata> = {};
+    map.forEach((v, k) => { obj[k] = v; });
+    localStorage.setItem(META_LS_KEY, JSON.stringify(obj));
+  } catch {}
+}
 
 export interface BrandBalance {
   brand: Address;
@@ -19,17 +40,22 @@ export class ContractService {
   private factoryAddress: string;
 
   private brandsCache: Address[] | null = null;
-  private metaCache = new Map<string, JettonMetadata>();
+  private metaCache: Map<string, JettonMetadata>;
+  private metaMissCache = new Set<string>();
   private pairsCache = new Map<string, { pairs: { brand: Address; rate: number }[]; ts: number }>();
   private readonly PAIRS_TTL = 30_000;
 
   constructor(factoryAddress: string) {
     this.factoryAddress = factoryAddress;
+    this.metaCache = loadMetaFromStorage();
   }
 
   clearCache() {
     this.brandsCache = null;
-    this.metaCache.clear();
+    this.pairsCache.clear();
+  }
+
+  clearBalancesOnly() {
     this.pairsCache.clear();
   }
 
@@ -49,41 +75,25 @@ export class ContractService {
   async getAllBrands(): Promise<Address[]> {
     if (this.brandsCache !== null) return this.brandsCache;
 
-    const countResult = await runGetMethod(this.factoryAddress, 'brandCount');
-    const numHex: string = countResult.stack?.[0]?.num ?? '0x0';
-    const count = Number(BigInt(numHex));
-
-    if (count === 0) {
+    const dataHex = await getAccountData(this.factoryAddress);
+    if (!dataHex) {
       this.brandsCache = [];
       return [];
     }
 
-    const brands: Address[] = [];
-    const CHUNK = 5;
-
-    for (let i = 0; i < count; i += CHUNK) {
-      const indices = Array.from({ length: Math.min(CHUNK, count - i) }, (_, k) => i + k);
-      const results = await Promise.all(
-        indices.map(async (idx) => {
-          try {
-            const res = await runGetMethod(this.factoryAddress, 'brandAddress', [idx.toString()]);
-            const stackItem = res.stack?.[0];
-            if (!stackItem) return null;
-            const cellHex: string = stackItem.cell ?? stackItem.slice ?? null;
-            if (!cellHex) return null;
-            const cell = Cell.fromBoc(Buffer.from(cellHex, 'hex'))[0];
-            return cell.beginParse().loadAddress();
-          } catch (e) {
-            console.warn(`getAllBrands: failed to fetch brand[${idx}]`, e);
-            return null;
-          }
-        })
-      );
-      brands.push(...results.filter((a): a is Address => a !== null));
+    try {
+      const cell = Cell.fromBoc(Buffer.from(dataHex, 'hex'))[0];
+      const slice = cell.beginParse();
+      slice.loadBit();
+      const parsed = loadFactory$Data(slice);
+      const brands: Address[] = [];
+      for (const v of parsed.brands.values()) brands.push(v);
+      this.brandsCache = brands;
+      return brands;
+    } catch (e) {
+      console.error('getAllBrands: failed to parse factory data', e);
+      throw e;
     }
-
-    this.brandsCache = brands;
-    return brands;
   }
 
   async getUserBalances(userAddress: Address, attempts = 3): Promise<BrandBalance[]> {
@@ -113,24 +123,38 @@ export class ContractService {
       } catch {}
     }
 
-    const brandStrings = brands.map(b => b.toString({ urlSafe: true, bounceable: true }));
-    const infoMap = await getBatchJettonInfo(brandStrings);
+    const needFetch = brands.filter(b => {
+      const raw = b.toRawString();
+      return !this.metaCache.has(raw) && !this.metaMissCache.has(raw);
+    });
+
+    if (needFetch.length > 0) {
+      const needStrings = needFetch.map(b => b.toString({ urlSafe: true, bounceable: true }));
+      const infoMap = await getBatchJettonInfo(needStrings);
+      let metaChanged = false;
+      for (const b of needFetch) {
+        const raw = b.toRawString();
+        const bounceable = b.toString({ urlSafe: true, bounceable: true });
+        let info = infoMap.get(bounceable);
+        if (!info) info = await this._getBrandMetaFromState(b) ?? undefined;
+        if (info && info.name) {
+          this.metaCache.set(raw, info);
+          metaChanged = true;
+        } else {
+          this.metaMissCache.add(raw);
+        }
+      }
+      if (metaChanged) saveMetaToStorage(this.metaCache);
+    }
 
     const results: BrandBalance[] = [];
     for (const brandAddr of brands) {
       const raw = brandAddr.toRawString();
       const bounceable = brandAddr.toString({ urlSafe: true, bounceable: true });
-      let info = infoMap.get(bounceable);
-
-      if (!info) {
-        info = await this._getBrandMetaFromContract(brandAddr) ?? undefined;
-      }
-
+      const info = this.metaCache.get(raw);
       const meta = info
         ? { name: info.name, symbol: info.symbol, description: info.description, image: info.image }
         : { name: `Brand ${bounceable.slice(0, 6)}…`, symbol: '???', description: '', image: '' };
-
-      if (info) this.metaCache.set(raw, info);
 
       results.push({
         brand: brandAddr,
@@ -142,33 +166,26 @@ export class ContractService {
     return results;
   }
 
-  private async _getBrandMetaFromContract(brandAddress: Address): Promise<JettonMetadata | null> {
+  private async _getBrandMetaFromState(brandAddress: Address): Promise<JettonMetadata | null> {
     try {
       const addrStr = brandAddress.toString({ urlSafe: true, bounceable: true });
-      const res = await runGetMethod(addrStr, 'data');
-      const stack = res?.stack;
-      if (!stack || stack.length < 6) return null;
-      const getString = (item: any): string => {
-        if (!item) return '';
-        if (item.type === 'slice' || item.type === 'cell') {
-          try {
-            const hex: string = item.cell ?? item.slice ?? '';
-            if (!hex) return '';
-            const cell = Cell.fromBoc(Buffer.from(hex, 'hex'))[0];
-            const slice = cell.beginParse();
-            const bytes: number[] = [];
-            while (slice.remainingBits >= 8) bytes.push(slice.loadUint(8));
-            return Buffer.from(bytes).toString('utf8');
-          } catch { return ''; }
-        }
-        return '';
+      const dataHex = await getAccountData(addrStr);
+      if (!dataHex) return null;
+      const cell = Cell.fromBoc(Buffer.from(dataHex, 'hex'))[0];
+      const slice = cell.beginParse();
+      slice.loadBit();
+      const parsed = loadBrandJetton$Data(slice);
+      return {
+        address: addrStr,
+        name: parsed.name,
+        symbol: parsed.symbol,
+        description: parsed.description,
+        image: parsed.imageUrl,
+        admin: parsed.owner.toString({ urlSafe: true, bounceable: true }),
+        totalSupply: parsed.totalSupply.toString(),
       };
-      const name = getString(stack[2]);
-      const symbol = getString(stack[3]);
-      const description = getString(stack[4]);
-      const imageUrl = getString(stack[5]);
-      return { address: addrStr, name, symbol, description, image: imageUrl, admin: null, totalSupply: '0' };
-    } catch {
+    } catch (e) {
+      console.warn('_getBrandMetaFromState failed', e);
       return null;
     }
   }
@@ -248,10 +265,36 @@ export class ContractService {
     const cached = this.pairsCache.get(fromRaw);
     if (cached && Date.now() - cached.ts < this.PAIRS_TTL) return cached.pairs;
 
+    const others = otherBrands.filter(t => t.toRawString() !== fromRaw);
+    const fromAddr = fromBrand.toString({ urlSafe: true, bounceable: true });
+
+    try {
+      const dataHex = await getAccountData(fromAddr);
+      if (dataHex) {
+        const cell = Cell.fromBoc(Buffer.from(dataHex, 'hex'))[0];
+        const slice = cell.beginParse();
+        slice.loadBit();
+        const parsed = loadBrandJetton$Data(slice);
+
+        const otherSet = new Set(others.map(t => t.toRawString()));
+        const pairs: { brand: Address; rate: number }[] = [];
+        for (const [target, rate] of parsed.proposedRates) {
+          const targetRaw = target.toRawString();
+          if (!otherSet.has(targetRaw)) continue;
+          if (parsed.acceptedByPeer.get(target) !== true) continue;
+          const r = Number(rate);
+          if (r > 0) pairs.push({ brand: target, rate: r });
+        }
+        this.pairsCache.set(fromRaw, { pairs, ts: Date.now() });
+        return pairs;
+      }
+    } catch (e) {
+      console.warn('getActivePairs: state parse failed, falling back to get-methods', e);
+    }
+
     const results = await Promise.all(
-      otherBrands.filter(t => t.toRawString() !== fromRaw).map(async (target) => {
+      others.map(async (target) => {
         try {
-          const fromAddr = fromBrand.toString({ urlSafe: true, bounceable: true });
           const targetAddr = target.toString({ urlSafe: true, bounceable: true });
           const [activeRes, rateRes] = await Promise.all([
             runGetMethod(fromAddr, 'swapActive', [targetAddr]),
@@ -271,11 +314,28 @@ export class ContractService {
 
   async getIncomingProposals(brandAddress: Address): Promise<Map<string, number>> {
     const result = new Map<string, number>();
+    const addrStr = brandAddress.toString({ urlSafe: true, bounceable: true });
+
     try {
-      const res = await runGetMethod(
-        brandAddress.toString({ urlSafe: true, bounceable: true }),
-        'getIncomingProposals'
-      );
+      const dataHex = await getAccountData(addrStr);
+      if (dataHex) {
+        const cell = Cell.fromBoc(Buffer.from(dataHex, 'hex'))[0];
+        const slice = cell.beginParse();
+        slice.loadBit();
+        const parsed = loadBrandJetton$Data(slice);
+        for (const [key, val] of parsed.incomingProposals) {
+          try {
+            result.set(key.toString({ urlSafe: true, bounceable: true }), Number(val));
+          } catch {}
+        }
+        return result;
+      }
+    } catch (e) {
+      console.warn('getIncomingProposals: state parse failed, falling back to get-method', e);
+    }
+
+    try {
+      const res = await runGetMethod(addrStr, 'getIncomingProposals');
       const stackItem = res.stack?.[0];
       if (!stackItem || stackItem.type === 'null') return result;
       const cellHex: string = stackItem.cell ?? stackItem.slice;
