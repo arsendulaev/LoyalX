@@ -70,7 +70,7 @@ async function getActivePairs(fromBrand: string, otherBrands: string[]): Promise
 }
 
 async function pollOnce(): Promise<void> {
-  const registrations = getAllRegistrations();
+  const registrations = await getAllRegistrations();
   if (registrations.length === 0) return;
 
   for (const reg of registrations) {
@@ -78,8 +78,8 @@ async function pollOnce(): Promise<void> {
       try {
         const proposals = await getIncomingProposals(brandAddress);
         for (const [proposerAddr, rate] of proposals) {
-          const alreadyNotified = isProposalNotified(brandAddress, proposerAddr);
-          upsertProposalSnapshot(brandAddress, proposerAddr, rate, true);
+          const alreadyNotified = await isProposalNotified(brandAddress, proposerAddr);
+          await upsertProposalSnapshot(brandAddress, proposerAddr, rate, true);
 
           if (!alreadyNotified) {
             const [mySymbol, proposerSymbol] = await Promise.all([
@@ -102,11 +102,11 @@ async function pollOnce(): Promise<void> {
 
         const activePairs = await getActivePairs(brandAddress, uniqueTargets);
         for (const targetAddr of activePairs) {
-          const alreadyNotified = isActivePairNotified(brandAddress, targetAddr);
+          const alreadyNotified = await isActivePairNotified(brandAddress, targetAddr);
           if (!alreadyNotified) {
             const ourProposalToTarget = proposals.has(targetAddr);
             if (!ourProposalToTarget) {
-              markActivePairNotified(brandAddress, targetAddr);
+              await markActivePairNotified(brandAddress, targetAddr);
               const [mySymbol, acceptorSymbol] = await Promise.all([
                 getJettonName(brandAddress),
                 getJettonName(targetAddr),
@@ -120,7 +120,7 @@ async function pollOnce(): Promise<void> {
               await sendTelegramMessage(reg.chatId, text);
               console.log(`[poller] Sent accepted_outgoing to ${reg.chatId}`);
             } else {
-              markActivePairNotified(brandAddress, targetAddr);
+              await markActivePairNotified(brandAddress, targetAddr);
             }
           }
         }

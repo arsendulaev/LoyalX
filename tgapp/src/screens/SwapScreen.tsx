@@ -29,7 +29,7 @@ const labelStyle: React.CSSProperties = {
 export function SwapScreen() {
   const { connected, address } = useTonConnect();
   const contractService = useContract();
-  const { brands } = useBrands();
+  const { brands, balances } = useBrands();
   const [tonConnectUI] = useTonConnectUI();
   const [fromBrand, setFromBrand] = useState('');
   const [toBrand, setToBrand] = useState('');
@@ -63,16 +63,32 @@ export function SwapScreen() {
     if (!amount || Number(amount) <= 0) { toast.error('Укажите количество'); return; }
     const pair = activePairs.find(p => p.brandAddr === toBrand);
     if (!pair) { toast.error('Нет курса для этой пары'); return; }
+    let amountNano: bigint;
+    try {
+      amountNano = toNano(amount);
+    } catch {
+      toast.error('Некорректное количество');
+      return;
+    }
+    const fromAddr = Address.parse(fromBrand);
+    const fromRaw = fromAddr.toRawString();
+    const fromBalance = balances.find(b => b.brand.toRawString() === fromRaw)?.balance ?? 0n;
+    if (fromBalance < amountNano) {
+      const fromInfoCheck = brands.find(b => b.address.toRawString() === fromRaw);
+      const human = Number(fromBalance) / 1e9;
+      toast.error(`Недостаточно ${fromInfoCheck?.symbol ?? 'токенов'} (доступно: ${human.toLocaleString('ru', { maximumFractionDigits: 4 })})`);
+      return;
+    }
     setLoading(true);
     try {
       const msg = await contractService.buildSwapPayload({
-        fromBrandAddress: Address.parse(fromBrand),
+        fromBrandAddress: fromAddr,
         toBrandAddress: Address.parse(toBrand),
-        amount: toNano(amount),
+        amount: amountNano,
         userAddress: address!,
       });
       await tonConnectUI.sendTransaction({ validUntil: Math.floor(Date.now() / 1000) + 600, network: '-3', messages: [msg] });
-      toast.success('Обмен отправлен! Ожидайте подтверждения.');
+      toast.success('Транзакция отправлена. Проверьте баланс после подтверждения.');
       const fromInfo = brands.find(b => b.address.toString({ urlSafe: true, bounceable: true }) === fromBrand);
       notifyEvent('swap', { fromSymbol: fromInfo?.symbol ?? '', toSymbol: pair.symbol, amount });
       setAmount('');

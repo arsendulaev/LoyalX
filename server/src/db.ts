@@ -1,23 +1,25 @@
 import fs from 'fs';
 import path from 'path';
+import { Pool } from 'pg';
 
-const DB_PATH = process.env.DB_PATH ?? path.join(__dirname, '../../notify.json');
-
-interface DbData {
-  registrations: Record<string, { walletAddress: string; chatId: string; brandAddresses: string[] }>;
-  proposalSnapshots: Record<string, Record<string, { rate: number; notifiedIncoming: boolean }>>;
-  activePairSnapshots: Record<string, Record<string, boolean>>;
+const DATABASE_URL = process.env.DATABASE_URL;
+if (!DATABASE_URL) {
+  console.error('[db] DATABASE_URL is not set. Aborting.');
+  process.exit(1);
 }
 
-function read(): DbData {
-  if (!fs.existsSync(DB_PATH)) {
-    return { registrations: {}, proposalSnapshots: {}, activePairSnapshots: {} };
-  }
-  return JSON.parse(fs.readFileSync(DB_PATH, 'utf-8')) as DbData;
-}
+export const pool = new Pool({
+  connectionString: DATABASE_URL,
+  ssl: { rejectUnauthorized: false },
+});
 
-function write(data: DbData): void {
-  fs.writeFileSync(DB_PATH, JSON.stringify(data, null, 2), 'utf-8');
+pool.on('error', (err) => console.error('[db] pool error:', err));
+
+export async function initDb(): Promise<void> {
+  const sqlPath = path.join(__dirname, '../migrations/001_init.sql');
+  const sql = fs.readFileSync(sqlPath, 'utf-8');
+  await pool.query(sql);
+  console.log('[db] Connected to Postgres, schema ready');
 }
 
 export interface Registration {
@@ -26,36 +28,112 @@ export interface Registration {
   brandAddresses: string[];
 }
 
-export function upsertRegistration(reg: Registration): void {
-  const db = read();
-  db.registrations[reg.walletAddress] = reg;
-  write(db);
+export async function upsertRegistration(reg: Registration): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      `INSERT INTO registrations (wallet_address, chat_id, updated_at)
+       VALUES ($1, $2, NOW())
+       ON CONFLICT (wallet_address)
+       DO UPDATE SET chat_id = EXCLUDED.chat_id, updated_at = NOW()`,
+      [reg.walletAddress, reg.chatId]
+    );
+    await client.query(
+      `DELETE FROM registration_brands WHERE wallet_address = $1`,
+      [reg.walletAddress]
+    );
+    if (reg.brandAddresses.length > 0) {
+      const values: string[] = [];
+      const params: string[] = [];
+      reg.brandAddresses.forEach((brand, i) => {
+        values.push(`($1, $${i + 2})`);
+        params.push(brand);
+      });
+      await client.query(
+        `INSERT INTO registration_brands (wallet_address, brand_address)
+         VALUES ${values.join(', ')}
+         ON CONFLICT DO NOTHING`,
+        [reg.walletAddress, ...params]
+      );
+    }
+    await client.query('COMMIT');
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  } finally {
+    client.release();
+  }
 }
 
-export function getAllRegistrations(): Registration[] {
-  return Object.values(read().registrations);
+export async function getAllRegistrations(): Promise<Registration[]> {
+  const { rows } = await pool.query<{
+    wallet_address: string;
+    chat_id: string;
+    brand_addresses: string[] | null;
+  }>(
+    `SELECT r.wallet_address,
+            r.chat_id,
+            COALESCE(ARRAY_AGG(b.brand_address) FILTER (WHERE b.brand_address IS NOT NULL), '{}') AS brand_addresses
+     FROM registrations r
+     LEFT JOIN registration_brands b ON b.wallet_address = r.wallet_address
+     GROUP BY r.wallet_address, r.chat_id`
+  );
+  return rows.map((r) => ({
+    walletAddress: r.wallet_address,
+    chatId: r.chat_id,
+    brandAddresses: r.brand_addresses ?? [],
+  }));
 }
 
-export function isProposalNotified(brandAddress: string, proposerAddress: string): boolean {
-  const db = read();
-  return db.proposalSnapshots[brandAddress]?.[proposerAddress]?.notifiedIncoming === true;
+export async function isProposalNotified(
+  brandAddress: string,
+  proposerAddress: string
+): Promise<boolean> {
+  const { rows } = await pool.query(
+    `SELECT 1 FROM proposal_snapshots
+     WHERE brand_address = $1 AND proposer_address = $2 AND notified_incoming = TRUE`,
+    [brandAddress, proposerAddress]
+  );
+  return rows.length > 0;
 }
 
-export function upsertProposalSnapshot(brandAddress: string, proposerAddress: string, rate: number, notifiedIncoming: boolean): void {
-  const db = read();
-  if (!db.proposalSnapshots[brandAddress]) db.proposalSnapshots[brandAddress] = {};
-  db.proposalSnapshots[brandAddress][proposerAddress] = { rate, notifiedIncoming };
-  write(db);
+export async function upsertProposalSnapshot(
+  brandAddress: string,
+  proposerAddress: string,
+  rate: number,
+  notifiedIncoming: boolean
+): Promise<void> {
+  await pool.query(
+    `INSERT INTO proposal_snapshots (brand_address, proposer_address, rate, notified_incoming, updated_at)
+     VALUES ($1, $2, $3, $4, NOW())
+     ON CONFLICT (brand_address, proposer_address)
+     DO UPDATE SET rate = EXCLUDED.rate,
+                   notified_incoming = EXCLUDED.notified_incoming,
+                   updated_at = NOW()`,
+    [brandAddress, proposerAddress, rate, notifiedIncoming]
+  );
 }
 
-export function isActivePairNotified(fromBrand: string, toBrand: string): boolean {
-  const db = read();
-  return db.activePairSnapshots[fromBrand]?.[toBrand] === true;
+export async function isActivePairNotified(
+  fromBrand: string,
+  toBrand: string
+): Promise<boolean> {
+  const { rows } = await pool.query(
+    `SELECT 1 FROM active_pair_snapshots WHERE from_brand = $1 AND to_brand = $2`,
+    [fromBrand, toBrand]
+  );
+  return rows.length > 0;
 }
 
-export function markActivePairNotified(fromBrand: string, toBrand: string): void {
-  const db = read();
-  if (!db.activePairSnapshots[fromBrand]) db.activePairSnapshots[fromBrand] = {};
-  db.activePairSnapshots[fromBrand][toBrand] = true;
-  write(db);
+export async function markActivePairNotified(
+  fromBrand: string,
+  toBrand: string
+): Promise<void> {
+  await pool.query(
+    `INSERT INTO active_pair_snapshots (from_brand, to_brand, notified_at)
+     VALUES ($1, $2, NOW())
+     ON CONFLICT (from_brand, to_brand) DO NOTHING`,
+    [fromBrand, toBrand]
+  );
 }
