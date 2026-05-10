@@ -5,6 +5,8 @@
 > Это учебный прототип, а не production-система — см. раздел «Текущие ограничения».
 
 ---
+[![Telegram](https://img.shields.io/badge/-telegram-red?color=white&logo=telegram&logoColor=black)](https://t.me/loyalxapp_bot)
+---
 
 ## Содержание
 
