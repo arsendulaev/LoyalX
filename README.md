@@ -5,7 +5,7 @@
 > Это учебный прототип, а не production-система — см. раздел «Текущие ограничения».
 
 ---
-[![Telegram](https://img.shields.io/badge/-telegram-red?color=white&logo=telegram&logoColor=black)](https://t.me/loyalxapp_bot)
+[![Telegram](https://raw.githubusercontent.com/CLorant/readme-social-icons/main/large/filled/telegram.svg)](https://t.me/loyalxapp_bot)
 ---
 
 ## Содержание
