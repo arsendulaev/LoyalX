@@ -16,9 +16,12 @@ export const pool = new Pool({
 pool.on('error', (err) => console.error('[db] pool error:', err));
 
 export async function initDb(): Promise<void> {
-  const sqlPath = path.join(__dirname, '../migrations/001_init.sql');
-  const sql = fs.readFileSync(sqlPath, 'utf-8');
-  await pool.query(sql);
+  const migrationsDir = path.join(__dirname, '../migrations');
+  const files = fs.readdirSync(migrationsDir).filter((f) => f.endsWith('.sql')).sort();
+  for (const file of files) {
+    const sql = fs.readFileSync(path.join(migrationsDir, file), 'utf-8');
+    await pool.query(sql);
+  }
   console.log('[db] Connected to Postgres, schema ready');
 }
 
@@ -26,6 +29,13 @@ export interface Registration {
   walletAddress: string;
   chatId: string;
   brandAddresses: string[];
+}
+
+export interface BrandRegistration {
+  walletAddress: string;
+  chatId: string;
+  brandAddress: string;
+  seeded: boolean;
 }
 
 export async function upsertRegistration(reg: Registration): Promise<void> {
@@ -84,6 +94,33 @@ export async function getAllRegistrations(): Promise<Registration[]> {
     chatId: r.chat_id,
     brandAddresses: r.brand_addresses ?? [],
   }));
+}
+
+export async function getBrandRegistrations(): Promise<BrandRegistration[]> {
+  const { rows } = await pool.query<{
+    wallet_address: string;
+    chat_id: string;
+    brand_address: string;
+    seeded: boolean;
+  }>(
+    `SELECT r.wallet_address, r.chat_id, b.brand_address, b.seeded
+     FROM registrations r
+     JOIN registration_brands b ON b.wallet_address = r.wallet_address`
+  );
+  return rows.map((r) => ({
+    walletAddress: r.wallet_address,
+    chatId: r.chat_id,
+    brandAddress: r.brand_address,
+    seeded: r.seeded,
+  }));
+}
+
+export async function markBrandSeeded(walletAddress: string, brandAddress: string): Promise<void> {
+  await pool.query(
+    `UPDATE registration_brands SET seeded = TRUE
+     WHERE wallet_address = $1 AND brand_address = $2`,
+    [walletAddress, brandAddress]
+  );
 }
 
 export async function isProposalNotified(

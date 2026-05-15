@@ -29,14 +29,14 @@ app.post('/register', async (req, res) => {
 
 app.post('/notify', async (req, res) => {
   const { chatId, event, data } = req.body as NotifyPayload;
-  if (!chatId || !event) {
+  if (!chatId || chatId === 'undefined' || !event) {
     res.status(400).json({ error: 'chatId and event required' });
     return;
   }
   const text = formatMessage(event, data);
-  await sendTelegramMessage(chatId, text);
-  console.log(`[notify] event=${event} chatId=${chatId}`);
-  res.json({ ok: true });
+  const ok = await sendTelegramMessage(chatId, text);
+  console.log(`[notify] event=${event} chatId=${chatId} ok=${ok}`);
+  res.status(ok ? 200 : 502).json({ ok });
 });
 
 app.get('/health', (_req, res) => res.json({ ok: true }));

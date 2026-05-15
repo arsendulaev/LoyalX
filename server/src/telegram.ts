@@ -1,14 +1,29 @@
-const BOT_TOKEN = process.env.BOT_TOKEN!;
+const BOT_TOKEN = process.env.BOT_TOKEN;
+if (!BOT_TOKEN) {
+  console.error('[telegram] BOT_TOKEN is not set. Aborting.');
+  process.exit(1);
+}
 
-export async function sendTelegramMessage(chatId: string, text: string): Promise<void> {
-  const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML' }),
-  });
-  if (!res.ok) {
-    const body = await res.text();
-    console.error(`Telegram error ${res.status}: ${body}`);
+export async function sendTelegramMessage(chatId: string, text: string): Promise<boolean> {
+  if (!chatId || chatId === 'undefined' || chatId === 'null') {
+    console.error(`[telegram] refusing to send: invalid chatId="${chatId}"`);
+    return false;
+  }
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML' }),
+    });
+    if (!res.ok) {
+      const body = await res.text();
+      console.error(`[telegram] error ${res.status} chatId=${chatId}: ${body}`);
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.error(`[telegram] fetch failed chatId=${chatId}:`, e);
+    return false;
   }
 }
 

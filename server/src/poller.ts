@@ -1,9 +1,21 @@
-import { getAllRegistrations, isProposalNotified, upsertProposalSnapshot, isActivePairNotified, markActivePairNotified } from './db';
+import {
+  getBrandRegistrations,
+  isProposalNotified,
+  upsertProposalSnapshot,
+  isActivePairNotified,
+  markActivePairNotified,
+  markBrandSeeded,
+} from './db';
 import { sendTelegramMessage, formatMessage } from './telegram';
 
 const TONAPI_BASE = 'https://testnet.tonapi.io/v2';
 const TONAPI_KEY = process.env.TONAPI_KEY;
 const POLL_INTERVAL_MS = 60_000;
+const SWAP_ACTIVE_CONCURRENCY = 2;
+
+if (!TONAPI_KEY) {
+  console.warn('[poller] TONAPI_KEY is not set — rate limits will be very low and you will see 429s.');
+}
 
 async function tonApiGet<T>(path: string): Promise<T> {
   const headers: Record<string, string> = { 'Accept': 'application/json' };
@@ -29,104 +41,129 @@ async function getJettonName(masterAddress: string): Promise<string> {
 
 async function getIncomingProposals(brandAddress: string): Promise<Map<string, number>> {
   const result = new Map<string, number>();
-  try {
-    const res = await runGetMethod(brandAddress, 'getIncomingProposals');
-    const stackItem = res.stack?.[0];
-    if (!stackItem || stackItem.type === 'null') return result;
+  const res = await runGetMethod(brandAddress, 'getIncomingProposals');
+  const stackItem = res.stack?.[0];
+  if (!stackItem || stackItem.type === 'null') return result;
 
-    const cellHex: string = stackItem.cell ?? stackItem.slice;
-    if (!cellHex) return result;
+  const entries: Array<{ key: string; value: string }> = stackItem.entries ?? [];
+  for (const entry of entries) {
+    const proposerAddr = entry.key;
+    const rate = parseInt(entry.value, 16);
+    if (proposerAddr && rate > 0) result.set(proposerAddr, rate);
+  }
 
-    const entries: Array<{ key: string; value: string }> = stackItem.entries ?? [];
-    for (const entry of entries) {
-      const proposerAddr = entry.key;
-      const rate = parseInt(entry.value, 16);
-      if (proposerAddr && rate > 0) result.set(proposerAddr, rate);
+  if (result.size === 0 && res.decoded) {
+    for (const [k, v] of Object.entries(res.decoded ?? {})) {
+      result.set(k, Number(v));
     }
-
-    if (result.size === 0 && res.decoded) {
-      for (const [k, v] of Object.entries(res.decoded ?? {})) {
-        result.set(k, Number(v));
-      }
-    }
-  } catch (e) {
-    console.error(`getIncomingProposals(${brandAddress}):`, e);
   }
   return result;
 }
 
 async function getActivePairs(fromBrand: string, otherBrands: string[]): Promise<Set<string>> {
   const active = new Set<string>();
-  await Promise.all(
-    otherBrands.filter(t => t !== fromBrand).map(async (target) => {
+  const targets = otherBrands.filter(t => t !== fromBrand);
+  for (let i = 0; i < targets.length; i += SWAP_ACTIVE_CONCURRENCY) {
+    const batch = targets.slice(i, i + SWAP_ACTIVE_CONCURRENCY);
+    await Promise.all(batch.map(async (target) => {
       try {
         const res = await runGetMethod(fromBrand, 'swapActive', [target]);
         const isActive = !!parseInt(res.stack?.[0]?.num ?? '0x0', 16);
         if (isActive) active.add(target);
-      } catch {}
-    })
-  );
+      } catch (e) {
+        throw e;
+      }
+    }));
+  }
   return active;
 }
 
-async function pollOnce(): Promise<void> {
-  const registrations = await getAllRegistrations();
-  if (registrations.length === 0) return;
+interface BrandTask {
+  walletAddress: string;
+  chatId: string;
+  brandAddress: string;
+  seeded: boolean;
+}
 
-  for (const reg of registrations) {
-    for (const brandAddress of reg.brandAddresses) {
-      try {
-        const proposals = await getIncomingProposals(brandAddress);
-        for (const [proposerAddr, rate] of proposals) {
-          const alreadyNotified = await isProposalNotified(brandAddress, proposerAddr);
-          await upsertProposalSnapshot(brandAddress, proposerAddr, rate, true);
+async function processBrand(task: BrandTask, allBrands: string[]): Promise<void> {
+  const { walletAddress, chatId, brandAddress, seeded } = task;
 
-          if (!alreadyNotified) {
-            const [mySymbol, proposerSymbol] = await Promise.all([
-              getJettonName(brandAddress),
-              getJettonName(proposerAddr),
-            ]);
-            const text = formatMessage('rate_accepted_incoming', {
-              myBrand: brandAddress,
-              mySymbol,
-              proposer: proposerAddr,
-              proposerSymbol,
-            });
-            await sendTelegramMessage(reg.chatId, text);
-            console.log(`[poller] Sent incoming_proposal to ${reg.chatId}`);
-          }
-        }
+  let proposals: Map<string, number>;
+  try {
+    proposals = await getIncomingProposals(brandAddress);
+  } catch (e) {
+    console.error(`[poller] getIncomingProposals(${brandAddress}) failed, skipping brand:`, (e as Error).message);
+    return;
+  }
 
-        const allBrands = registrations.flatMap(r => r.brandAddresses).filter(b => b !== brandAddress);
-        const uniqueTargets = [...new Set(allBrands)];
+  for (const [proposerAddr, rate] of proposals) {
+    const alreadyNotified = await isProposalNotified(brandAddress, proposerAddr);
+    await upsertProposalSnapshot(brandAddress, proposerAddr, rate, true);
 
-        const activePairs = await getActivePairs(brandAddress, uniqueTargets);
-        for (const targetAddr of activePairs) {
-          const alreadyNotified = await isActivePairNotified(brandAddress, targetAddr);
-          if (!alreadyNotified) {
-            const ourProposalToTarget = proposals.has(targetAddr);
-            if (!ourProposalToTarget) {
-              await markActivePairNotified(brandAddress, targetAddr);
-              const [mySymbol, acceptorSymbol] = await Promise.all([
-                getJettonName(brandAddress),
-                getJettonName(targetAddr),
-              ]);
-              const text = formatMessage('rate_accepted_outgoing', {
-                myBrand: brandAddress,
-                mySymbol,
-                acceptor: targetAddr,
-                acceptorSymbol,
-              });
-              await sendTelegramMessage(reg.chatId, text);
-              console.log(`[poller] Sent accepted_outgoing to ${reg.chatId}`);
-            } else {
-              await markActivePairNotified(brandAddress, targetAddr);
-            }
-          }
-        }
-      } catch (e) {
-        console.error(`[poller] Error for brand ${brandAddress}:`, e);
+    if (!alreadyNotified && seeded) {
+      const [mySymbol, proposerSymbol] = await Promise.all([
+        getJettonName(brandAddress),
+        getJettonName(proposerAddr),
+      ]);
+      const text = formatMessage('rate_accepted_incoming', {
+        myBrand: brandAddress,
+        mySymbol,
+        proposer: proposerAddr,
+        proposerSymbol,
+      });
+      await sendTelegramMessage(chatId, text);
+      console.log(`[poller] Sent incoming_proposal to ${chatId}`);
+    }
+  }
+
+  const uniqueTargets = [...new Set(allBrands.filter(b => b !== brandAddress))];
+  let activePairs: Set<string>;
+  try {
+    activePairs = await getActivePairs(brandAddress, uniqueTargets);
+  } catch (e) {
+    console.error(`[poller] getActivePairs(${brandAddress}) failed, skipping pair detection:`, (e as Error).message);
+    return;
+  }
+
+  for (const targetAddr of activePairs) {
+    const alreadyNotified = await isActivePairNotified(brandAddress, targetAddr);
+    if (!alreadyNotified) {
+      const ourProposalToTarget = proposals.has(targetAddr);
+      await markActivePairNotified(brandAddress, targetAddr);
+      if (!ourProposalToTarget && seeded) {
+        const [mySymbol, acceptorSymbol] = await Promise.all([
+          getJettonName(brandAddress),
+          getJettonName(targetAddr),
+        ]);
+        const text = formatMessage('rate_accepted_outgoing', {
+          myBrand: brandAddress,
+          mySymbol,
+          acceptor: targetAddr,
+          acceptorSymbol,
+        });
+        await sendTelegramMessage(chatId, text);
+        console.log(`[poller] Sent accepted_outgoing to ${chatId}`);
       }
+    }
+  }
+
+  if (!seeded) {
+    await markBrandSeeded(walletAddress, brandAddress);
+    console.log(`[poller] Seeded brand ${brandAddress} for wallet ${walletAddress} (no notifications sent)`);
+  }
+}
+
+async function pollOnce(): Promise<void> {
+  const brandRegs = await getBrandRegistrations();
+  if (brandRegs.length === 0) return;
+
+  const allBrands = brandRegs.map(b => b.brandAddress);
+
+  for (const task of brandRegs) {
+    try {
+      await processBrand(task, allBrands);
+    } catch (e) {
+      console.error(`[poller] Unexpected error for brand ${task.brandAddress}:`, e);
     }
   }
 }
